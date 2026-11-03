@@ -5,7 +5,7 @@
 Pick a system, scroll through the box art, press **A** to play. No keyboard, no settings menus —
 just your games, the way a console shows them.
 
-> **Status: 0.1.1 — early release.** Tested on Linux Mint 22.3 (Cinnamon, X11) with Xbox-style and
+> **Status: 0.2.0 — early release.** Tested on Linux Mint 22.3 (Cinnamon, X11) with Xbox-style and
 > PlayStation controllers. It hasn't been tried on other
 > setups yet, so expect rough edges and please [report them](CONTRIBUTING.md).
 >
@@ -54,6 +54,10 @@ vice versa.
 - **Jump by letter** — **LB / RB** skip through long lists alphabetically.
 - **Controller shortcuts in games** — **Select + Start** quits back to Insert Coin;
   clicking **both sticks** opens RetroArch's menu for save states and settings.
+- **Works with any controller** — Xbox, PlayStation and Nintendo-style pads are recognised
+  automatically, and the on-screen button hints match the controller in your hand (✕ ○ △ on
+  PlayStation, A B Y on Xbox and Nintendo, key caps on the keyboard). Unrecognised pads get a
+  one-time set-up screen.
 - **Start on login** — optionally boot straight into the game menu, like turning on a console.
 - **Smooth on big screens** — renders at 1080p and is scaled by the GPU, so it stays fluid on 4K
   displays. Artwork loads in the background while you scroll.
@@ -64,7 +68,7 @@ vice versa.
 |---|---|---|
 | D-pad / left stick | Arrow keys | Move · up/down skips 10 games |
 | **A** or Start | Enter | Open a system · play a game |
-| **B** or Back | Esc / Backspace | Back · on the home screen: exit dialog |
+| **B** or Back | Esc / Backspace | Back · on the home screen: the menu (Resume · Set up controller · Exit) |
 | **Y** | F | Add / remove favorite |
 | **LB / RB** | Page Up / Page Down | Previous / next letter |
 
@@ -75,8 +79,28 @@ vice versa.
 | **Select + Start** | Quit the game and return to Insert Coin |
 | **L3 + R3** (click both sticks) | RetroArch quick menu: save/load state, settings, quit |
 
-Any controller that SDL recognizes as a game controller works — Xbox, PlayStation, 8BitDo,
-Switch Pro and most generic pads — with buttons mapped by position.
+The table uses Xbox names; Insert Coin shows the matching symbols for your controller:
+
+| Action | Xbox | PlayStation | Nintendo-style | Keyboard |
+|---|---|---|---|---|
+| Open / play | A | ✕ | A | Enter |
+| Back | B | ○ | B | Esc |
+| Favorite | Y | △ | Y | F |
+| Previous / next letter | LB / RB | L1 / R1 | L / R | PgUp / PgDn |
+| Quit a game | Back + Start | Select + Start (PS3) · Share + Options | Minus + Plus | Esc |
+
+### Controllers
+
+- **Recognised automatically:** any controller SDL knows — Xbox 360/One/Series, PlayStation 3/4/5,
+  Switch Pro, 8BitDo, Logitech and most branded pads. The controller family is detected from its
+  USB vendor, so the hints are right even when a pad has a generic name.
+- **Anything else** (cheap generic USB pads, many arcade-stick encoders): press any button on it
+  and Insert Coin opens **Set up your controller**. Press the button you want for each action —
+  Up, Down, Left, Right, A (select), B (back), and optionally Y, LB and RB (press your new B to skip
+  those). Buttons, d-pads and sticks all work; a button can't be given two jobs. The set-up is
+  saved per controller model, so it happens once. To redo it: **B** on the home screen →
+  **Set up controller**. Esc on the keyboard cancels.
+- **In games**, buttons are handled by RetroArch's own controller profiles.
 
 ## Prerequisites
 
@@ -218,6 +242,7 @@ can overwrite each other's settings.
 | `~/.config/retroarch/content_favorites.lpl` | When you add/remove a favorite (only while RetroArch is closed) |
 | `~/.local/share/insert-coin/launch.cfg` | Each game launch: the in-game controller shortcuts, passed to RetroArch with `--appendconfig` |
 | `~/.cache/insert-coin/meta/` | Cached year/publisher lookups |
+| `~/.config/insert-coin/controllers.json` | Button set-ups for controllers that aren't recognised automatically |
 
 **Note:** RetroArch saves its settings when it closes, so the in-game shortcuts
 (Select + Start to quit, L3 + R3 for the menu) become part of your RetroArch configuration
@@ -232,7 +257,8 @@ and also work when you run RetroArch on its own. You can change them in RetroArc
 | **"No core is set for this game"** | Set a default core for that playlist in RetroArch (*Settings → Playlists → Manage Playlists*) or set the game's core association. |
 | **"The game closed straight away"** | The game doesn't run with its assigned core, or a BIOS file is missing. Try it in RetroArch directly to see the error, then change the core. |
 | **No artwork** | Run `sync_thumbnails.py`. Some games — hacks, prototypes, translations — have no artwork on the server and get a name card instead. |
-| **Controller does nothing** | Check the controller works in RetroArch. Insert Coin supports controllers SDL recognizes as game controllers; keyboard controls always work. |
+| **Controller does nothing** | Press a button: an unrecognised controller opens the set-up screen. If nothing happens, check the controller works in RetroArch (`retroarch --version`, Settings → Input). Keyboard controls always work. |
+| **Set up a controller wrongly** | **B** on the home screen → **Set up controller** to do it again, or delete `~/.config/insert-coin/controllers.json`. |
 | **Can't quit a game with the controller** | Press Select + Start together. If that was changed in RetroArch, use your RetroArch hotkey or the Esc key. |
 | **Stutters while scrolling the first time** | Artwork loads in the background on first view, then stays cached for the session. |
 

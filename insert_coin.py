@@ -16,7 +16,7 @@ Controls (Xbox-style pad; keyboard in brackets)
 Options: --windowed   run in a window (for testing)
          --shot DIR   render sample screens to PNG files and exit (no display needed)
 """
-__version__ = "0.1.1"
+__version__ = "0.2.0"
 
 import json, os, re, sys, time, random, threading, subprocess, collections
 
@@ -83,7 +83,16 @@ GLYPHS = {
     "keyboard": {"a": ("key", "Enter", None), "b": ("key", "Esc", None),
                  "y": ("key", "F", None), "lbrb": ("key", "PgUp PgDn", None)},
 }
-QUIT_COMBO = {"xbox": "Back + Start", "playstation": "Share + Options", "nintendo": "Minus + Plus", "keyboard": "Esc"}
+GLYPHS["generic"] = {"a": ("letter", "A", (110, 116, 132)), "b": ("letter", "B", (110, 116, 132)),   # set-up pads
+                     "y": ("letter", "Y", (110, 116, 132)), "lbrb": ("pill", "LB RB", (120, 130, 150))}
+QUIT_COMBO = {"xbox": "Back + Start", "playstation": "Share + Options", "nintendo": "Minus + Plus", "keyboard": "Esc",
+              "generic": "Select + Start"}
+
+# controller set-up for pads SDL doesn't recognise: (action, button shown, what it does, optional)
+SETUP_STEPS = [("up", "up", "Up", False), ("down", "down", "Down", False), ("left", "left", "Left", False),
+               ("right", "right", "Right", False), ("a", "A", "Select / play", False), ("b", "B", "Back", False),
+               ("y", "Y", "Favorite", True), ("lb", "LB", "Previous letter", True), ("rb", "RB", "Next letter", True)]
+CONFDIR = os.environ.get("INSERT_COIN_CONFIG") or os.path.expanduser("~/.config/insert-coin")
 
 
 def quit_combo(style, name="", guid=""):
@@ -412,6 +421,8 @@ class App:
         self.img = Images(sync=bool(shot))
         self.pads = {}; self.pad_style = {}                         # device index -> Controller; instance id -> style
         self.pad_quit = {}; self.cur_pad = None                    # instance id -> quit-combo words; last pad used
+        self.raw = {}; self.raw_map = {}                           # unrecognised joysticks: instance id -> Joystick / mapping
+        self.saved_maps = self.load_maps(); self.setup = None
         self.style = "keyboard"                                    # button hints follow the last device used
         self.open_pads()
         if self.pad_style: self.cur_pad, self.style = next(iter(self.pad_style.items()))
@@ -440,6 +451,87 @@ class App:
                     st = controller_style(c.name, j.get_guid()); self.pad_style[j.get_instance_id()] = st
                     self.pad_quit[j.get_instance_id()] = quit_combo(st, c.name, j.get_guid())
                 except Exception: pass
+            elif not sdlc.is_controller(i):                         # a joystick SDL has no mapping for
+                try:
+                    j = pygame.joystick.Joystick(i); iid = j.get_instance_id()
+                    if iid in self.raw: continue
+                    self.raw[iid] = j
+                    m = self.saved_maps.get(j.get_guid())
+                    if m: self.use_map(iid, m["map"])
+                except Exception: pass
+
+    # -- controller set-up for unrecognised pads
+    def load_maps(self):
+        try:
+            with open(f"{CONFDIR}/controllers.json") as f: return json.load(f)
+        except Exception: return {}
+
+    def save_maps(self):
+        os.makedirs(CONFDIR, exist_ok=True)
+        tmp = f"{CONFDIR}/controllers.json.tmp"
+        with open(tmp, "w") as f: json.dump(self.saved_maps, f, indent=2)
+        os.replace(tmp, f"{CONFDIR}/controllers.json")
+
+    def use_map(self, iid, mapping):
+        self.raw_map[iid] = mapping; self.pad_style[iid] = "generic"; self.pad_quit[iid] = QUIT_COMBO["generic"]
+
+    def start_setup(self, iid, name="", guid="", baseline=None):
+        j = self.raw.get(iid)
+        if baseline is None:                                       # resting axis positions (triggers rest at -1)
+            baseline = {k: j.get_axis(k) for k in range(j.get_numaxes())} if j else {}
+        self.setup = {"iid": iid, "name": name or (j.get_name() if j else "Controller"), "guid": guid or (j.get_guid() if j else ""),
+                      "step": 0, "map": {}, "base": baseline, "wait": None, "msg": "", "prev": self.screen_mode}
+        self.screen_mode = "setup"; self.hold.clear()
+
+    def setup_input(self, e):
+        s = self.setup
+        cand = None
+        if e.type == pygame.JOYBUTTONDOWN: cand = ["button", e.button]
+        elif e.type == pygame.JOYBUTTONUP and s["wait"] == ["button", e.button]: s["wait"] = None
+        elif e.type == pygame.JOYHATMOTION:
+            x, y = e.value
+            if (x, y) == (0, 0):
+                if s["wait"] and s["wait"][0] == "hat" and s["wait"][1] == e.hat: s["wait"] = None
+            else: cand = ["hat", e.hat, 0, y] if y else ["hat", e.hat, x, 0]
+        elif e.type == pygame.JOYAXISMOTION:
+            base = s["base"].get(e.axis, 0.0)
+            if s["wait"] and s["wait"][0] == "axis" and s["wait"][1] == e.axis and abs(e.value - base) < 0.3: s["wait"] = None
+            elif abs(e.value - base) > 0.6 and abs(e.value) > 0.5: cand = ["axis", e.axis, 1 if e.value > 0 else -1]
+        if cand is None or s["wait"]: return                       # nothing new, or the last input isn't released yet
+        act, shown, what, optional = SETUP_STEPS[s["step"]]
+        s["wait"] = cand
+        if optional and cand == s["map"].get("b"):                 # B skips an optional step
+            s["msg"] = ""; self.next_setup_step(); return
+        used = next((a for a, v in s["map"].items() if v == cand), None)
+        if used:
+            label = next(w for a2, _, w, _ in SETUP_STEPS if a2 == used)
+            s["msg"] = f"That one is already {label} - try another"; return
+        s["map"][act] = cand; s["msg"] = ""; self.next_setup_step()
+
+    def next_setup_step(self):
+        s = self.setup; s["step"] += 1
+        if s["step"] < len(SETUP_STEPS): return
+        self.saved_maps[s["guid"] or s["name"]] = {"name": s["name"], "map": s["map"]}
+        try: self.save_maps()
+        except Exception as e: self.say(f"Could not save the controller set-up: {e}")
+        self.use_map(s["iid"], s["map"]); self.cur_pad, self.style = s["iid"], "generic"
+        self.screen_mode = s["prev"] if s["prev"] != "quit" else "systems"; self.setup = None
+        self.hold.clear(); self.say("Controller ready")
+
+    def cancel_setup(self):
+        self.screen_mode = self.setup["prev"] if self.setup["prev"] != "quit" else "systems"; self.setup = None
+        self.say("Controller set-up cancelled")
+
+    def raw_input(self, e):
+        """Turn a set-up pad's raw joystick events into menu actions."""
+        m = self.raw_map[e.instance_id]
+        for act, b in m.items():
+            if e.type in (pygame.JOYBUTTONDOWN, pygame.JOYBUTTONUP) and b == ["button", e.button]:
+                self.set_hold(act, e.type == pygame.JOYBUTTONDOWN)
+            elif e.type == pygame.JOYHATMOTION and b[0] == "hat" and b[1] == e.hat:
+                self.set_hold(act, (b[2] != 0 and e.value[0] == b[2]) or (b[3] != 0 and e.value[1] == b[3]))
+            elif e.type == pygame.JOYAXISMOTION and b[0] == "axis" and b[1] == e.axis:
+                self.set_hold(act, e.value * b[2] > 0.5)
 
     # -- current state helpers
     @property
@@ -462,7 +554,7 @@ class App:
             n = len(self.games())
             if n: self.gi[self.sys["id"]] = max(0, min(n - 1, self.cur_gi() + d))
         elif self.screen_mode == "quit":
-            self.quit_sel = 1 - self.quit_sel
+            self.quit_sel = (self.quit_sel + (1 if d > 0 else -1)) % len(self.POWER_MENU)
 
     def jump_letter(self, d):
         if self.screen_mode != "games": return
@@ -486,12 +578,24 @@ class App:
             g = self.cur_game()
             if g: self.launch(g)
         elif self.screen_mode == "quit":
-            if self.quit_sel == 0: self.running = False
-            else: self.screen_mode = "systems"
+            choice = self.POWER_MENU[self.quit_sel]
+            if choice == "Resume": self.screen_mode = "systems"
+            elif choice == "Exit Insert Coin": self.running = False
+            else: self.setup_from_menu()
+
+    def setup_from_menu(self):
+        """Set up (or redo) the unrecognised controller used last, or say why it isn't needed."""
+        iid = self.cur_pad if self.cur_pad in self.raw else next(iter(self.raw), None)
+        if iid is None:
+            self.screen_mode = "systems"
+            self.say("Your controller is recognised automatically - no set-up needed" if self.pads
+                     else "Connect a controller first, then choose Set up controller")
+            return
+        self.start_setup(iid)
 
     def back(self):
         if self.screen_mode == "games": self.screen_mode = "systems"
-        elif self.screen_mode == "systems": self.screen_mode = "quit"; self.quit_sel = 1
+        elif self.screen_mode == "systems": self.screen_mode = "quit"; self.quit_sel = 0
         else: self.screen_mode = "systems"
 
     def favorite(self):
@@ -560,6 +664,27 @@ class App:
              pygame.CONTROLLER_BUTTON_A: "a", pygame.CONTROLLER_BUTTON_B: "b", pygame.CONTROLLER_BUTTON_Y: "y",
              pygame.CONTROLLER_BUTTON_LEFTSHOULDER: "lb", pygame.CONTROLLER_BUTTON_RIGHTSHOULDER: "rb",
              pygame.CONTROLLER_BUTTON_START: "a", pygame.CONTROLLER_BUTTON_BACK: "b"}
+        JOY = (pygame.JOYBUTTONDOWN, pygame.JOYBUTTONUP, pygame.JOYHATMOTION, pygame.JOYAXISMOTION)
+        jid = getattr(e, "instance_id", None)
+        if e.type == pygame.JOYDEVICEADDED: self.open_pads()
+        elif e.type == pygame.JOYDEVICEREMOVED and jid in self.raw:
+            if self.setup and self.setup["iid"] == jid: self.cancel_setup()
+            for d in (self.raw, self.raw_map, self.pad_style, self.pad_quit): d.pop(jid, None)
+            if self.cur_pad == jid: self.cur_pad, self.style = next(iter(self.pad_style.items()), (None, "keyboard"))
+        if self.screen_mode == "setup":                            # the set-up screen owns the input
+            if e.type == pygame.QUIT: self.running = False
+            elif e.type in JOY and jid == self.setup["iid"]: self.setup_input(e)
+            elif (e.type == pygame.KEYDOWN and e.key == pygame.K_ESCAPE) or \
+                 (e.type == pygame.CONTROLLERBUTTONDOWN and e.button == pygame.CONTROLLER_BUTTON_B): self.cancel_setup()
+            return
+        if e.type in JOY and jid in self.raw:                      # unrecognised pads: set up, or use their mapping
+            if jid in self.raw_map:
+                if e.type == pygame.JOYBUTTONDOWN or (e.type == pygame.JOYHATMOTION and e.value != (0, 0)) \
+                   or (e.type == pygame.JOYAXISMOTION and abs(e.value) > 0.5):
+                    self.cur_pad, self.style = jid, "generic"
+                self.raw_input(e)
+            elif e.type == pygame.JOYBUTTONDOWN: self.start_setup(jid)
+            return
         if e.type == pygame.KEYDOWN: self.style = "keyboard"
         elif e.type in (pygame.CONTROLLERBUTTONDOWN, pygame.CONTROLLERAXISMOTION) and hasattr(e, "instance_id"):
             if e.type == pygame.CONTROLLERBUTTONDOWN or abs(e.value) > 16000:
@@ -664,7 +789,7 @@ class App:
             x = self.draw_button(action, x, y)
             r = text(self.screen, f, label, (x, y), (225, 228, 238), anchor="midleft"); x = r.right + 40
 
-    def draw_systems(self):
+    def draw_systems(self, hints=True):
         s = self.sys
         self.draw_background(s["color"])
         self.draw_header("Insert Coin", f"{sum(len(x['games']) for x in self.lib.systems if not x['special']):,} games · {len([x for x in self.lib.systems if not x['special']])} systems")
@@ -702,7 +827,7 @@ class App:
         for i in range(n):
             pygame.draw.circle(self.screen, (255, 255, 255) if i == self.si else (110, 115, 130), (x0 + i * 22 + 11, 790), 6 if i == self.si else 4)
         text(self.screen, self.fonts(30), s["maker"] if s["special"] else f"{len(s['games']):,} games", (W / 2, 850), (210, 215, 228), anchor="midtop")
-        self.draw_hints([("a", "Open"), ("b", "Power")])
+        if hints: self.draw_hints([("a", "Open"), ("b", "Power")])
 
     def draw_games(self):
         s = self.sys; gs = self.games(); i = self.cur_gi(); g = gs[i] if gs else None
@@ -768,16 +893,48 @@ class App:
             text(self.screen, self.fonts(150, True), self.jump[0], (cx, cy), anchor="center")
         self.draw_hints([("a", "Play"), ("b", "Back"), ("y", "Favorite"), ("lbrb", "Jump A–Z")])
 
+    POWER_MENU = ("Resume", "Set up controller", "Exit Insert Coin")
+
     def draw_quit(self):
-        self.draw_systems()
+        self.draw_systems(hints=False)
         dim = pygame.Surface((W, H), pygame.SRCALPHA); dim.fill((0, 0, 0, 170)); self.screen.blit(dim, (0, 0))
-        box = pygame.Rect(0, 0, 760, 330); box.center = (W / 2, H / 2)
+        box = pygame.Rect(0, 0, 640, 470); box.center = (W / 2, H / 2)
         rrect(self.screen, (28, 30, 42), box, 28); rrect(self.screen, (90, 95, 115), box, 28, 3)
-        text(self.screen, self.fonts(44, True), "Exit Insert Coin?", (W / 2, box.top + 60), anchor="midtop")
-        for k, lbl in enumerate(("Exit", "Stay")):
-            r = pygame.Rect(0, 0, 250, 80); r.center = (W / 2 + (-150 if k == 0 else 150), box.bottom - 95)
-            rrect(self.screen, (230, 232, 240) if self.quit_sel == k else (55, 58, 75), r, 20)
-            text(self.screen, self.fonts(34, True), lbl, r.center, (20, 22, 30) if self.quit_sel == k else (230, 232, 240), anchor="center", shadow=False)
+        text(self.screen, self.fonts(44, True), "Insert Coin", (W / 2, box.top + 48), anchor="midtop")
+        for k, lbl in enumerate(self.POWER_MENU):
+            r = pygame.Rect(0, 0, 480, 76); r.center = (W / 2, box.top + 180 + k * 96)
+            on = self.quit_sel == k
+            rrect(self.screen, (230, 232, 240) if on else (55, 58, 75), r, 20)
+            text(self.screen, self.fonts(32, True), lbl, r.center, (20, 22, 30) if on else (230, 232, 240), anchor="center", shadow=False)
+        self.draw_hints([("a", "Choose"), ("b", "Close")])
+
+    def draw_setup(self):
+        s = self.setup; act, shown, what, optional = SETUP_STEPS[s["step"]]
+        self.draw_background((60, 70, 100))
+        self.draw_header("Set up your controller", s["name"])
+        text(self.screen, self.fonts(30), f"Step {s['step'] + 1} of {len(SETUP_STEPS)}", (W / 2, 250), (190, 195, 210), anchor="midtop")
+        text(self.screen, self.fonts(40), "Press the button you want for", (W / 2, 330), anchor="midtop")
+        cy = 500                                                    # the button being asked for, big
+        if shown in ("up", "down", "left", "right"):
+            pygame.draw.circle(self.screen, (110, 116, 132), (W / 2, cy), 70)
+            pts = {"up": [(0, -34), (30, 18), (-30, 18)], "down": [(0, 34), (30, -18), (-30, -18)],
+                   "left": [(-34, 0), (18, -30), (18, 30)], "right": [(34, 0), (-18, -30), (-18, 30)]}[shown]
+            pygame.draw.polygon(self.screen, (255, 255, 255), [(W / 2 + x, cy + y) for x, y in pts])
+        else:
+            f = self.fonts(80, True); tw = max(140, f.size(shown)[0] + 70)
+            if len(shown) == 1: pygame.draw.circle(self.screen, (110, 116, 132), (W / 2, cy), 70)
+            else: rrect(self.screen, (120, 130, 150), pygame.Rect(W / 2 - tw / 2, cy - 60, tw, 120), 28)
+            text(self.screen, f, shown, (W / 2, cy), anchor="center", shadow=False)
+        text(self.screen, self.fonts(44, True), what, (W / 2, 610), anchor="midtop")
+        if s["msg"]:
+            text(self.screen, self.fonts(30), s["msg"], (W / 2, 690), (255, 170, 120), anchor="midtop")
+        elif optional:
+            text(self.screen, self.fonts(30), "Optional - press your B button to skip", (W / 2, 690), (190, 195, 210), anchor="midtop")
+        for k in range(len(SETUP_STEPS)):                          # progress dots
+            x = W / 2 + (k - (len(SETUP_STEPS) - 1) / 2) * 34
+            pygame.draw.circle(self.screen, (255, 255, 255) if k <= s["step"] else (90, 95, 115), (x, 790), 9 if k == s["step"] else 7)
+        text(self.screen, self.fonts(26), "Buttons, the d-pad and sticks all work.   Esc on the keyboard cancels.",
+             (W / 2, H - 70), (170, 175, 190), anchor="midtop")
 
     def splash(self, g):
         self.screen.fill((0, 0, 0))
@@ -800,6 +957,8 @@ class App:
 
     def draw(self):
         self.img.pump()
+        if self.screen_mode == "setup":
+            return self.draw_setup()
         if not self.lib.systems:
             return self.draw_empty()
         {"systems": self.draw_systems, "games": self.draw_games, "quit": self.draw_quit}[self.screen_mode]()
