@@ -60,6 +60,32 @@ video_fullscreen = "true"
 """
 
 
+# ---------------------------------------------------------------- controller styles (for on-screen button hints)
+def controller_style(name, guid=""):
+    """'playstation', 'nintendo' or 'xbox', from the USB vendor in SDL's GUID, falling back to the name."""
+    n = (name or "").lower()
+    vendor = guid[10:12] + guid[8:10] if len(guid) >= 12 else ""     # bytes 4-5 of the GUID, little-endian
+    if vendor == "054c" or any(k in n for k in ("ps3", "ps4", "ps5", "playstation", "dualshock", "dualsense", "sony")):
+        return "playstation"
+    if vendor == "057e" or any(k in n for k in ("nintendo", "switch", "joy-con", "joycon")):
+        return "nintendo"
+    return "xbox"
+
+
+# action -> how its button looks, per style. kinds: letter (round button), shape (PlayStation symbol), pill, key
+GLYPHS = {
+    "xbox": {"a": ("letter", "A", (90, 190, 90)), "b": ("letter", "B", (220, 80, 70)),
+             "y": ("letter", "Y", (230, 190, 50)), "lbrb": ("pill", "LB RB", (120, 130, 150))},
+    "playstation": {"a": ("shape", "cross", (120, 160, 245)), "b": ("shape", "circle", (235, 90, 95)),
+                    "y": ("shape", "triangle", (70, 200, 160)), "lbrb": ("pill", "L1 R1", (120, 130, 150))},
+    "nintendo": {"a": ("letter", "A", (110, 116, 132)), "b": ("letter", "B", (110, 116, 132)),
+                 "y": ("letter", "Y", (110, 116, 132)), "lbrb": ("pill", "L R", (120, 130, 150))},
+    "keyboard": {"a": ("key", "Enter", None), "b": ("key", "Esc", None),
+                 "y": ("key", "F", None), "lbrb": ("key", "PgUp PgDn", None)},
+}
+QUIT_COMBO = {"xbox": "Back + Start", "playstation": "Share + Options", "nintendo": "Minus + Plus", "keyboard": "Esc"}
+
+
 def sanitize(s):
     return re.sub(r'[&*/:`<>?\\|"]', "_", s)
 
@@ -376,8 +402,10 @@ class App:
         self.lib = Library()
         self.meta = Meta({s["id"] for s in self.lib.systems if not s["special"]})
         self.img = Images(sync=bool(shot))
-        self.pads = {}
+        self.pads = {}; self.pad_style = {}                         # device index -> Controller; instance id -> style
+        self.style = "keyboard"                                    # button hints follow the last device used
         self.open_pads()
+        if self.pad_style: self.style = next(iter(self.pad_style.values()))
         self.screen_mode = "systems"                              # systems | games | quit
         self.si = next((i for i, s in enumerate(self.lib.systems) if not s["special"]), 0)
         self.gi = {}                                              # system id -> selected game index
@@ -397,7 +425,10 @@ class App:
     def open_pads(self):
         for i in range(sdlc.get_count()):
             if sdlc.is_controller(i) and i not in self.pads:
-                try: self.pads[i] = sdlc.Controller(i)
+                try:
+                    c = sdlc.Controller(i); self.pads[i] = c
+                    j = c.as_joystick()
+                    self.pad_style[j.get_instance_id()] = controller_style(c.name, j.get_guid())
                 except Exception: pass
 
     # -- current state helpers
@@ -519,6 +550,10 @@ class App:
              pygame.CONTROLLER_BUTTON_A: "a", pygame.CONTROLLER_BUTTON_B: "b", pygame.CONTROLLER_BUTTON_Y: "y",
              pygame.CONTROLLER_BUTTON_LEFTSHOULDER: "lb", pygame.CONTROLLER_BUTTON_RIGHTSHOULDER: "rb",
              pygame.CONTROLLER_BUTTON_START: "a", pygame.CONTROLLER_BUTTON_BACK: "b"}
+        if e.type == pygame.KEYDOWN: self.style = "keyboard"
+        elif e.type in (pygame.CONTROLLERBUTTONDOWN, pygame.CONTROLLERAXISMOTION) and hasattr(e, "instance_id"):
+            if e.type == pygame.CONTROLLERBUTTONDOWN or abs(e.value) > 16000:
+                self.style = self.pad_style.get(e.instance_id, self.style)
         if e.type == pygame.QUIT: self.running = False
         elif e.type == pygame.KEYDOWN and e.key in K: self.set_hold(K[e.key], True)
         elif e.type == pygame.KEYUP and e.key in K: self.set_hold(K[e.key], False)
@@ -529,7 +564,9 @@ class App:
             v = e.value / 32767
             self.set_hold(neg, v < -0.55); self.set_hold(pos, v > 0.55)
         elif e.type == pygame.CONTROLLERDEVICEADDED: self.open_pads()
-        elif e.type == pygame.CONTROLLERDEVICEREMOVED: self.pads = {}; self.open_pads()
+        elif e.type == pygame.CONTROLLERDEVICEREMOVED:
+            self.pads = {}; self.pad_style = {}; self.open_pads()
+            if self.style != "keyboard": self.style = next(iter(self.pad_style.values()), "keyboard")
 
     def tick_repeat(self):
         now = time.time()
@@ -574,23 +611,48 @@ class App:
         text(self.screen, self.fonts(26), sub, (72, 108), (200, 205, 220))
         text(self.screen, self.fonts(34, True), time.strftime("%H:%M"), (W - 70, 52), anchor="topright")
 
+    def draw_button(self, action, x, cy, draw=True):
+        """Draw the button for `action` in the current controller style; return the x after it."""
+        kind, label, color = GLYPHS[self.style].get(action, GLYPHS["xbox"][action])
+        s = self.screen
+        if kind == "letter":
+            if draw:
+                pygame.draw.circle(s, color, (x + 21, cy), 21)
+                text(s, self.fonts(24, True), label, (x + 21, cy), anchor="center", shadow=False)
+            return x + 52
+        if kind == "shape":                                        # PlayStation: coloured symbol on a dark button
+            if draw:
+                cx = x + 21
+                pygame.draw.circle(s, (34, 37, 50), (cx, cy), 21); pygame.draw.circle(s, (90, 96, 115), (cx, cy), 21, 2)
+                if label == "cross":
+                    pygame.draw.line(s, color, (cx - 8, cy - 8), (cx + 8, cy + 8), 4); pygame.draw.line(s, color, (cx - 8, cy + 8), (cx + 8, cy - 8), 4)
+                elif label == "circle":
+                    pygame.draw.circle(s, color, (cx, cy), 9, 4)
+                elif label == "triangle":
+                    pygame.draw.polygon(s, color, [(cx, cy - 10), (cx + 10, cy + 8), (cx - 10, cy + 8)], 4)
+            return x + 52
+        f = self.fonts(22, True)                                   # pills (shoulder buttons) and keyboard keys
+        for part in label.split():
+            w = max(54, f.size(part)[0] + 26)
+            if draw:
+                r = pygame.Rect(x, cy - 19, w, 38)
+                if kind == "key":
+                    rrect(s, (225, 228, 238), r, 8); rrect(s, (150, 155, 170), r, 8, 2)
+                    text(s, f, part, r.center, (25, 28, 38), anchor="center", shadow=False)
+                else:
+                    rrect(s, color, r, 10); text(s, f, part, r.center, anchor="center", shadow=False)
+            x += w + 8
+        return x + 2
+
     def draw_hints(self, hints):
-        x = W / 2 - sum(self.fonts(26).size(t)[0] + 90 for _, t in hints) / 2
-        y = H - 70
-        colors = {"A": (90, 190, 90), "B": (220, 80, 70), "Y": (230, 190, 50), "LB": (120, 130, 150), "RB": (120, 130, 150)}
-        for btn, label in hints:
-            c = colors.get(btn, (120, 130, 150))
-            if len(btn) == 1:
-                pygame.draw.circle(self.screen, c, (x + 22, y + 16), 21)
-                text(self.screen, self.fonts(24, True), btn, (x + 22, y + 16), anchor="center", shadow=False)
-                x += 54
-            else:
-                for part in btn.split():
-                    r = pygame.Rect(x, y - 3, 64, 38); rrect(self.screen, c, r, 10)
-                    text(self.screen, self.fonts(22, True), part, r.center, anchor="center", shadow=False)
-                    x += 74
-                x += 2
-            r = text(self.screen, self.fonts(26), label, (x, y + 16), (225, 228, 238), anchor="midleft"); x = r.right + 36
+        y, f = H - 54, self.fonts(26)
+        width = 0
+        for action, label in hints:                                # measure first, so the row is centred
+            width = self.draw_button(action, width, y, draw=False) + f.size(label)[0] + 40
+        x = W / 2 - (width - 40) / 2
+        for action, label in hints:
+            x = self.draw_button(action, x, y)
+            r = text(self.screen, f, label, (x, y), (225, 228, 238), anchor="midleft"); x = r.right + 40
 
     def draw_systems(self):
         s = self.sys
@@ -630,7 +692,7 @@ class App:
         for i in range(n):
             pygame.draw.circle(self.screen, (255, 255, 255) if i == self.si else (110, 115, 130), (x0 + i * 22 + 11, 790), 6 if i == self.si else 4)
         text(self.screen, self.fonts(30), s["maker"] if s["special"] else f"{len(s['games']):,} games", (W / 2, 850), (210, 215, 228), anchor="midtop")
-        self.draw_hints([("A", "Open"), ("B", "Power")])
+        self.draw_hints([("a", "Open"), ("b", "Power")])
 
     def draw_games(self):
         s = self.sys; gs = self.games(); i = self.cur_gi(); g = gs[i] if gs else None
@@ -694,7 +756,7 @@ class App:
             box = pygame.Surface((220, 220), pygame.SRCALPHA); rrect(box, (0, 0, 0, 190), box.get_rect(), 30)
             self.screen.blit(box, (cx - 110, cy - 110))
             text(self.screen, self.fonts(150, True), self.jump[0], (cx, cy), anchor="center")
-        self.draw_hints([("A", "Play"), ("B", "Back"), ("Y", "Favorite"), ("LB RB", "Jump A–Z")])
+        self.draw_hints([("a", "Play"), ("b", "Back"), ("y", "Favorite"), ("lbrb", "Jump A–Z")])
 
     def draw_quit(self):
         self.draw_systems()
@@ -712,7 +774,7 @@ class App:
         im = self.img.get(g.thumb("Named_Boxarts"), 420, 520)
         if im: self.screen.blit(im, im.get_rect(center=(W / 2, H / 2 - 60)))
         text(self.screen, self.fonts(44, True), g.title, (W / 2, H / 2 + 250), anchor="midtop", maxw=1500)
-        text(self.screen, self.fonts(26), "Starting…   (Select + Start quits the game)", (W / 2, H / 2 + 320), (180, 185, 200), anchor="midtop")
+        text(self.screen, self.fonts(26), f"Starting…   ({QUIT_COMBO[self.style]} quits the game)", (W / 2, H / 2 + 320), (180, 185, 200), anchor="midtop")
         pygame.display.flip()
 
     def draw_empty(self):
@@ -724,7 +786,7 @@ class App:
                  "then start Insert Coin again."]
         for n, ln in enumerate(lines):
             text(self.screen, self.fonts(34), ln, (W / 2, 360 + n * 56), (220, 224, 235), anchor="midtop")
-        self.draw_hints([("B", "Exit")])
+        self.draw_hints([("b", "Exit")])
 
     def draw(self):
         self.img.pump()
@@ -764,6 +826,14 @@ class App:
             snap(f"{n}_games_{re.sub(r'[^a-z0-9]+', '_', self.sys['name'].lower())}")
         self.screen_mode = "systems"; self.si = 0; self.spos = 0.0; snap(f"{len(big) + 2}_systems_first")
         self.screen_mode = "quit"; snap(f"{len(big) + 3}_quit")
+        # the button-hint bar in every controller style, stacked into one image
+        self.si = big[0]; self.screen_mode = "games"; strips = []
+        for st in GLYPHS:
+            self.style = st; self.draw()
+            strips.append(self.screen.subsurface((0, H - 110, W, 110)).copy())
+        sheet = pygame.Surface((W, 110 * len(strips)))
+        for k, strip in enumerate(strips): sheet.blit(strip, (0, 110 * k))
+        pygame.image.save(sheet, f"{self.shot}/{len(big) + 4}_button_styles.png")
         pygame.quit()
 
 
