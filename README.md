@@ -1,82 +1,258 @@
 # Insert Coin
 
-A controller-driven, console-style front end for [RetroArch](https://www.retroarch.com/) on Linux.
-Pick a system, scroll through box art, press **A** to play — no keyboard, no menus full of settings.
+**A controller-driven, console-style game menu for [RetroArch](https://www.retroarch.com/) on Linux.**
 
-**Version 0.1.0** — first release, not yet tested on real hardware.
+Pick a system, scroll through the box art, press **A** to play. No keyboard, no settings menus —
+just your games, the way a console shows them.
 
-Insert Coin is a *front end*, not an emulator. It reads RetroArch's own playlists, thumbnails,
-favorites and history, and starts each game in RetroArch with the core assigned to it.
-Whatever already works in RetroArch works here.
+> **Status: 0.1.1 — early release.** Feature-complete for everyday use, but not yet tested
+> widely on real hardware. Expect rough edges, and please [report them](CONTRIBUTING.md).
+
+---
+
+## Contents
+
+- [What it is (and isn't)](#what-it-is-and-isnt)
+- [Features](#features)
+- [Controls](#controls)
+- [Prerequisites](#prerequisites)
+- [Installation](#installation)
+- [Getting artwork](#getting-artwork-sync_thumbnailspy)
+- [Usage](#usage)
+- [Files Insert Coin reads and writes](#files-insert-coin-reads-and-writes)
+- [Troubleshooting](#troubleshooting)
+- [Uninstall](#uninstall)
+- [Legal](#legal)
+- [License](#license)
+
+---
+
+## What it is (and isn't)
+
+Insert Coin is a **front end**, not an emulator. RetroArch and its cores do the emulation;
+Insert Coin gives you a big-screen, controller-only way to browse and launch games.
+
+It reads everything from your existing RetroArch setup — playlists, the core assigned to each
+game, thumbnails, favorites and history — so **whatever already works in RetroArch works here**,
+and nothing has to be set up twice. Favorites you add in Insert Coin show up in RetroArch, and
+vice versa.
 
 ## Features
 
-- **System carousel** — Favorites and Recently Played first, then each system with a fan of its box art,
-  friendly names, and empty systems hidden.
-- **Game carousel** — large box art, the game's in-game snapshot blurred behind it, and its title screen
-  in a side panel; year and publisher from RetroArch's databases where known.
-- **Favorites** — **Y** adds or removes a game; shared with RetroArch's own Favorites.
-- **Jump by letter** — **LB / RB** skip to the previous / next letter in long lists.
+- **System carousel** — every RetroArch playlist as a tile with a fan of its box art.
+  *Favorites* and *Recently Played* come first. Systems get friendly names
+  ("Super Nintendo" instead of "Nintendo - Super Nintendo Entertainment System"), and empty
+  playlists are hidden.
+- **Game carousel** — large box art in the middle, the selected game's in-game snapshot blurred
+  behind it, and its title screen in a side panel. Year and publisher are shown where
+  RetroArch's databases know them. Games without artwork get a clean name card.
+- **Favorites** — press **Y** on any game to add or remove it.
+- **Jump by letter** — **LB / RB** skip through long lists alphabetically.
 - **Controller shortcuts in games** — **Select + Start** quits back to Insert Coin;
-  clicking both sticks opens RetroArch's menu (save states, settings).
-- **Start on login** — optional, so the machine boots straight into the game menu.
+  clicking **both sticks** opens RetroArch's menu for save states and settings.
+- **Start on login** — optionally boot straight into the game menu, like turning on a console.
+- **Smooth on big screens** — renders at 1080p and is scaled by the GPU, so it stays fluid on 4K
+  displays. Artwork loads in the background while you scroll.
 
 ## Controls
 
 | Controller (Xbox layout) | Keyboard | Action |
 |---|---|---|
-| D-pad / left stick | Arrow keys | Move (up/down skips 10 games) |
-| A / Start | Enter | Open system / play game |
-| B / Back | Esc / Backspace | Back · on the home screen: exit dialog |
-| Y | F | Toggle favorite |
-| LB / RB | Page Up / Page Down | Previous / next letter |
+| D-pad / left stick | Arrow keys | Move · up/down skips 10 games |
+| **A** or Start | Enter | Open a system · play a game |
+| **B** or Back | Esc / Backspace | Back · on the home screen: exit dialog |
+| **Y** | F | Add / remove favorite |
+| **LB / RB** | Page Up / Page Down | Previous / next letter |
 
-## Requirements
+**While a game is running** (provided by RetroArch):
 
-- Linux with a desktop session (tested on Ubuntu 24.04 / Cinnamon)
-- RetroArch with cores installed and playlists set up (`~/.config/retroarch`)
-- Thumbnails in RetroArch's thumbnails folder (see `sync_thumbnails.py` below)
-- Python 3.10+ and [pygame-ce](https://pypi.org/project/pygame-ce/)
+| Controller | Action |
+|---|---|
+| **Select + Start** | Quit the game and return to Insert Coin |
+| **L3 + R3** (click both sticks) | RetroArch quick menu: save/load state, settings, quit |
 
-No ROMs, BIOS files or artwork are included. You must supply your own games.
+Any controller that SDL recognizes as a game controller works — Xbox, PlayStation, 8BitDo,
+Switch Pro and most generic pads — with buttons mapped by position.
 
-## Install
+## Prerequisites
+
+| Requirement | Notes |
+|---|---|
+| **Linux desktop** | Developed on Linux Mint 22.3 (Ubuntu 24.04 base), Cinnamon, X11. Other distributions and Wayland should work but are untested. |
+| **RetroArch** | Installed as a native package so the `retroarch` command is on your `PATH` (e.g. `sudo apt install retroarch`). The Flatpak and Snap versions are not supported yet. |
+| **RetroArch cores** | The cores for your systems, installed via RetroArch → *Online Updater → Core Downloader*. |
+| **RetroArch playlists** | Your games scanned into playlists (RetroArch → *Import Content*). Insert Coin shows one system per playlist. |
+| **A core per game** | Each playlist needs a default core (*Settings → Playlists → Manage Playlists → Default Core*), or each game its own core association. Games without a core can't be launched. |
+| **Thumbnails** *(optional)* | Box art, snapshots and title screens in RetroArch's thumbnails folder. See [Getting artwork](#getting-artwork-sync_thumbnailspy). |
+| **Python 3.10+** | With the `venv` module (`python3-venv` on Debian/Ubuntu/Mint). |
+| **pygame-ce** | Installed automatically in the steps below. |
+| **Your own games** | Insert Coin includes **no** games, BIOS files or artwork. |
+
+**BIOS files:** some systems (e.g. PlayStation, Neo Geo) need BIOS files in RetroArch's `system`
+folder. Insert Coin does not provide or check these; if a game works in RetroArch, it works here.
+
+## Installation
+
+### 1. Get the code
 
 ```bash
-# 1. A private Python environment with pygame-ce
+git clone https://github.com/Madmartigan1/insert-coin.git ~/insert-coin
+```
+
+### 2. Create a private Python environment with pygame-ce
+
+```bash
+sudo apt install python3-venv        # Debian / Ubuntu / Linux Mint
 python3 -m venv ~/.local/share/insert-coin/venv
 ~/.local/share/insert-coin/venv/bin/pip install pygame-ce
-#    (Ubuntu without python3-pip: create the venv with --without-pip and unzip the
-#     pygame-ce wheel from PyPI into the venv's site-packages instead.)
-
-# 2. Run it
-~/.local/share/insert-coin/venv/bin/python insert_coin.py
 ```
 
-Options:
+<details>
+<summary>No sudo, or <code>ensurepip</code> is missing?</summary>
 
-- `--windowed` — run in a window instead of fullscreen
-- `--shot DIR` — render sample screens to PNG files without a display (for testing)
-
-To add it to the applications menu, create `~/.local/share/applications/insert-coin.desktop`
-whose `Exec=` line runs the command above; copy it to `~/.config/autostart/` to start on login.
-
-## Thumbnails: `sync_thumbnails.py`
-
-Downloads missing box art, snapshots and title screens for every RetroArch playlist from
-`thumbnails.libretro.com` — the same source RetroArch's own updater uses. It tries the exact
-name first, then a careful fuzzy match (ignoring tags like `(USA)`, preferring the same region).
-It never overwrites existing images.
+Create the environment without pip and unpack the pygame-ce wheel into it directly:
 
 ```bash
-python3 sync_thumbnails.py --dry   # show what would be downloaded
-python3 sync_thumbnails.py         # download
+python3 -m venv --without-pip ~/.local/share/insert-coin/venv
+# Download the pygame-ce wheel matching your Python version (e.g. cp312 for 3.12) and
+# platform (manylinux … x86_64) from https://pypi.org/project/pygame-ce/#files, then:
+SITE=$(~/.local/share/insert-coin/venv/bin/python -c 'import site; print(site.getsitepackages()[0])')
+unzip -q pygame_ce-*.whl -d "$SITE"
+```
+</details>
+
+Check it works:
+
+```bash
+~/.local/share/insert-coin/venv/bin/python -c "import pygame; print(pygame.version.ver)"
 ```
 
-## Files written
+### 3. Create a launcher command
+
+```bash
+cat > ~/.local/share/insert-coin/insert-coin <<'EOF'
+#!/bin/bash
+exec "$HOME/.local/share/insert-coin/venv/bin/python" "$HOME/insert-coin/insert_coin.py" "$@"
+EOF
+chmod +x ~/.local/share/insert-coin/insert-coin
+```
+
+(Adjust `$HOME/insert-coin` if you cloned somewhere else.)
+
+### 4. Add it to your applications menu
+
+```bash
+cat > ~/.local/share/applications/insert-coin.desktop <<EOF
+[Desktop Entry]
+Type=Application
+Name=Insert Coin
+Comment=Browse and play your retro games with a controller
+Exec=$HOME/.local/share/insert-coin/insert-coin
+Icon=input-gaming
+Terminal=false
+Categories=Game;
+EOF
+```
+
+### 5. *(Optional)* Start on login
+
+```bash
+mkdir -p ~/.config/autostart
+cp ~/.local/share/applications/insert-coin.desktop ~/.config/autostart/
+```
+
+## Getting artwork: `sync_thumbnails.py`
+
+Insert Coin uses RetroArch's thumbnails. `sync_thumbnails.py` fills in whatever is missing for
+**all** your playlists in one go, from `thumbnails.libretro.com` — the same source RetroArch's
+built-in updater uses.
+
+- Tries the exact game name first, then a careful fuzzy match that ignores tags such as
+  `(USA)` or `[!]` and prefers the same region as your copy.
+- Downloads box art, snapshots and title screens.
+- **Never overwrites** existing images — safe to re-run whenever you add games.
+- Needs only Python's standard library.
+
+```bash
+python3 ~/insert-coin/sync_thumbnails.py --dry   # show what would be downloaded, and roughly how much
+python3 ~/insert-coin/sync_thumbnails.py         # download
+```
+
+A large collection can mean several gigabytes of images on the first run.
+
+## Usage
+
+Start **Insert Coin** from your applications menu, or run:
+
+```bash
+~/.local/share/insert-coin/insert-coin
+```
+
+| Option | Effect |
+|---|---|
+| `--windowed` | Run in a window instead of fullscreen |
+| `--shot DIR` | Render sample screens to PNG files in `DIR` and exit — no display needed (for testing) |
+
+**Tip:** close RetroArch before starting Insert Coin. Two copies of RetroArch running at once
+can overwrite each other's settings.
+
+## Files Insert Coin reads and writes
+
+**Reads** (never modified, except where noted):
 
 | Path | What |
 |---|---|
-| `~/.local/share/insert-coin/launch.cfg` | Controller shortcuts passed to RetroArch with `--appendconfig` (RetroArch saves them into its config on exit) |
-| `~/.config/retroarch/content_favorites.lpl` | Updated when you toggle a favorite (only while RetroArch is closed) |
-| `~/.cache/insert-coin/meta/` | Year / publisher lookups parsed from RetroArch's `.rdb` databases |
+| `~/.config/retroarch/playlists/*.lpl` | Your systems and games, and each game's core |
+| `~/.config/retroarch/thumbnails/` | Box art, snapshots, title screens |
+| `~/.config/retroarch/content_history.lpl` | Recently Played |
+| `~/.config/retroarch/database/rdb/*.rdb` | Year and publisher information |
+
+**Writes:**
+
+| Path | When |
+|---|---|
+| `~/.config/retroarch/content_favorites.lpl` | When you add/remove a favorite (only while RetroArch is closed) |
+| `~/.local/share/insert-coin/launch.cfg` | Each game launch: the in-game controller shortcuts, passed to RetroArch with `--appendconfig` |
+| `~/.cache/insert-coin/meta/` | Cached year/publisher lookups |
+
+**Note:** RetroArch saves its settings when it closes, so the in-game shortcuts
+(Select + Start to quit, L3 + R3 for the menu) become part of your RetroArch configuration
+and also work when you run RetroArch on its own. You can change them in RetroArch under
+*Settings → Input → Hotkeys*.
+
+## Troubleshooting
+
+| Problem | What to try |
+|---|---|
+| **A system is missing** | Insert Coin hides empty playlists. Check the playlist exists in `~/.config/retroarch/playlists/` and has games. |
+| **"No core is set for this game"** | Set a default core for that playlist in RetroArch (*Settings → Playlists → Manage Playlists*) or set the game's core association. |
+| **"The game closed straight away"** | The game doesn't run with its assigned core, or a BIOS file is missing. Try it in RetroArch directly to see the error, then change the core. |
+| **No artwork** | Run `sync_thumbnails.py`. Some games — hacks, prototypes, translations — have no artwork on the server and get a name card instead. |
+| **Controller does nothing** | Check the controller works in RetroArch. Insert Coin supports controllers SDL recognizes as game controllers; keyboard controls always work. |
+| **Can't quit a game with the controller** | Press Select + Start together. If that was changed in RetroArch, use your RetroArch hotkey or the Esc key. |
+| **Stutters while scrolling the first time** | Artwork loads in the background on first view, then stays cached for the session. |
+
+## Uninstall
+
+```bash
+rm -rf ~/.local/share/insert-coin ~/.cache/insert-coin ~/insert-coin
+rm -f ~/.local/share/applications/insert-coin.desktop ~/.config/autostart/insert-coin.desktop
+```
+
+Your RetroArch setup, games, saves and favorites are not touched.
+
+## Legal
+
+Insert Coin is an independent project and is not affiliated with or endorsed by RetroArch,
+libretro, or any game or console maker. All product names and trademarks belong to their owners.
+
+Insert Coin does not include, download or distribute games, BIOS files or copyrighted artwork.
+Only use games you are legally entitled to. Thumbnails fetched by `sync_thumbnails.py` come
+from the libretro thumbnail project and remain subject to their owners' rights.
+
+## License
+
+[MIT](LICENSE) © 2026 Madmartigan1
+
+Insert Coin uses [pygame-ce](https://github.com/pygame-community/pygame-ce), which is licensed
+under the LGPL 2.1, as an installed library.
