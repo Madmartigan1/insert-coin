@@ -5,8 +5,12 @@
 Pick a system, scroll through the box art, press **A** to play. No keyboard, no settings menus —
 just your games, the way a console shows them.
 
-> **Status: 0.1.1 — early release.** Feature-complete for everyday use, but not yet tested
-> widely on real hardware. Expect rough edges, and please [report them](CONTRIBUTING.md).
+> **Status: 0.1.1 — early release.** Tested on Linux Mint 22.3 (Cinnamon, X11) with Xbox-style and
+> PlayStation controllers. It hasn't been tried on other
+> setups yet, so expect rough edges and please [report them](CONTRIBUTING.md).
+>
+> Insert Coin currently needs a working RetroArch setup. A standalone version that sets
+> everything up for you is a long-term goal.
 
 ---
 
