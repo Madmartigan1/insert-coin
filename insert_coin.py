@@ -16,7 +16,7 @@ Controls (Xbox-style pad; keyboard in brackets)
 Options: --windowed   run in a window (for testing)
          --shot DIR   render sample screens to PNG files and exit (no display needed)
 """
-__version__ = "0.2.0"
+__version__ = "0.2.1"
 
 import json, os, re, sys, time, random, threading, subprocess, collections
 
@@ -61,13 +61,23 @@ video_fullscreen = "true"
 
 
 # ---------------------------------------------------------------- controller styles (for on-screen button hints)
+# USB SNES replicas that SDL knows but maps by position, Xbox-style (vendor, product)
+SNES_REPLICA_IDS = {("0583", "2060")}                              # iBuffalo Classic USB Gamepad
+
+
 def controller_style(name, guid=""):
-    """'playstation', 'nintendo' or 'xbox', from the USB vendor in SDL's GUID, falling back to the name."""
+    """'playstation', 'nintendo', 'snes' (a third-party SNES replica) or 'xbox', from the USB vendor and product
+    in SDL's GUID, falling back to the name."""
     n = (name or "").lower()
     vendor = guid[10:12] + guid[8:10] if len(guid) >= 12 else ""     # bytes 4-5 of the GUID, little-endian
+    product = guid[18:20] + guid[16:18] if len(guid) >= 20 else ""   # bytes 8-9
     if vendor == "054c" or any(k in n for k in ("ps3", "ps4", "ps5", "playstation", "dualshock", "dualsense", "sony")):
         return "playstation"
-    if vendor == "057e" or any(k in n for k in ("nintendo", "switch", "joy-con", "joycon")):
+    if vendor == "057e":                                           # Nintendo's own pads: SDL follows their labels
+        return "nintendo"
+    if (vendor, product) in SNES_REPLICA_IDS or any(k in n for k in ("snes", "super nintendo", "super famicom")):
+        return "snes"
+    if any(k in n for k in ("nintendo", "switch", "joy-con", "joycon")):
         return "nintendo"
     return "xbox"
 
@@ -83,10 +93,11 @@ GLYPHS = {
     "keyboard": {"a": ("key", "Enter", None), "b": ("key", "Esc", None),
                  "y": ("key", "F", None), "lbrb": ("key", "PgUp PgDn", None)},
 }
+GLYPHS["snes"] = dict(GLYPHS["nintendo"])                        # replicas: same printed letters as Nintendo
 GLYPHS["generic"] = {"a": ("letter", "A", (110, 116, 132)), "b": ("letter", "B", (110, 116, 132)),   # set-up pads
                      "y": ("letter", "Y", (110, 116, 132)), "lbrb": ("pill", "LB RB", (120, 130, 150))}
 QUIT_COMBO = {"xbox": "Back + Start", "playstation": "Share + Options", "nintendo": "Minus + Plus", "keyboard": "Esc",
-              "generic": "Select + Start"}
+              "generic": "Select + Start", "snes": "Select + Start"}
 
 # controller set-up for pads SDL doesn't recognise: (action, button shown, what it does, optional)
 SETUP_STEPS = [("up", "up", "Up", False), ("down", "down", "Down", False), ("left", "left", "Left", False),
@@ -96,10 +107,13 @@ CONFDIR = os.environ.get("INSERT_COIN_CONFIG") or os.path.expanduser("~/.config/
 
 
 def quit_combo(style, name="", guid=""):
-    """The buttons that quit a game, as printed on this controller (PS3 pads say Select/Start)."""
+    """The buttons that quit a game, as printed on this controller (PS3: Select/Start, PS5: Create/Options)."""
     product = guid[18:20] + guid[16:18] if len(guid) >= 20 else ""   # bytes 8-9 of the GUID, little-endian
-    if style == "playstation" and (product == "0268" or "ps3" in (name or "").lower() or "playstation(r)3" in (name or "").lower()):
+    n = (name or "").lower()
+    if style == "playstation" and (product == "0268" or "ps3" in n or "playstation(r)3" in n):
         return "Select + Start"
+    if style == "playstation" and (product in ("0ce6", "0df2") or "dualsense" in n or "ps5" in n):
+        return "Create + Options"
     return QUIT_COMBO[style]
 
 
@@ -692,8 +706,14 @@ class App:
         if e.type == pygame.QUIT: self.running = False
         elif e.type == pygame.KEYDOWN and e.key in K: self.set_hold(K[e.key], True)
         elif e.type == pygame.KEYUP and e.key in K: self.set_hold(K[e.key], False)
-        elif e.type == pygame.CONTROLLERBUTTONDOWN and e.button in B: self.set_hold(B[e.button], True)
-        elif e.type == pygame.CONTROLLERBUTTONUP and e.button in B: self.set_hold(B[e.button], False)
+        elif e.type in (pygame.CONTROLLERBUTTONDOWN, pygame.CONTROLLERBUTTONUP):
+            if self.pad_style.get(getattr(e, "instance_id", None)) == "snes":
+                # SDL maps replicas by position: its "A" is the bottom button, printed B. Follow the printed
+                # labels like a real Nintendo pad: right (printed A) plays, bottom (B) goes back, left (Y) favorites.
+                Bs = dict(B); Bs.pop(pygame.CONTROLLER_BUTTON_Y)
+                Bs.update({pygame.CONTROLLER_BUTTON_A: "b", pygame.CONTROLLER_BUTTON_B: "a", pygame.CONTROLLER_BUTTON_X: "y"})
+            else: Bs = B
+            if e.button in Bs: self.set_hold(Bs[e.button], e.type == pygame.CONTROLLERBUTTONDOWN)
         elif e.type == pygame.CONTROLLERAXISMOTION and e.axis in (pygame.CONTROLLER_AXIS_LEFTX, pygame.CONTROLLER_AXIS_LEFTY):
             neg, pos = ("left", "right") if e.axis == pygame.CONTROLLER_AXIS_LEFTX else ("up", "down")
             v = e.value / 32767

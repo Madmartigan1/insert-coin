@@ -5,7 +5,7 @@
 Pick a system, scroll through the box art, press **A** to play. No keyboard, no settings menus —
 just your games, the way a console shows them.
 
-> **Status: 0.2.0 — early release.** Tested on Linux Mint 22.3 (Cinnamon, X11) with Xbox-style and
+> **Status: 0.2.1 — early release.** Tested on Linux Mint 22.3 (Cinnamon, X11) with Xbox-style and
 > PlayStation controllers. It hasn't been tried on other
 > setups yet, so expect rough edges and please [report them](CONTRIBUTING.md).
 >
@@ -105,9 +105,9 @@ The table uses Xbox names; Insert Coin shows the matching symbols for your contr
 | Back | B | ○ | B | Esc |
 | Favorite | Y | △ | Y | F |
 | Previous / next letter | LB / RB | L1 / R1 | L / R | PgUp / PgDn |
-| Quit a game | Back + Start | Select + Start (PS3) · Share + Options | Minus + Plus | Esc |
+| Quit a game | Back + Start | Select + Start (PS3) · Share + Options (PS4) · Create + Options (PS5) | Minus + Plus · Select + Start on SNES replicas | Esc |
 
-Switch / SNES-style means controllers with the Nintendo layout: Switch Pro, Joy-Con pairs and 8BitDo pads in Switch mode. Nintendo puts A on the right and B at the bottom, and Insert Coin follows the printed labels, so **A** always selects.
+Switch / SNES-style means controllers with the Nintendo layout: Switch Pro, Joy-Con pairs, 8BitDo pads in Switch mode, and USB SNES replicas (recognised by a name containing "SNES", "Super Nintendo" or "Super Famicom", or as the iBuffalo Classic pad). Nintendo puts A on the right and B at the bottom, and Insert Coin follows the printed labels, so **A** always selects — on replicas too, even though SDL reports their buttons by position. A replica that isn't recognised this way uses Xbox positions: the bottom button selects.
 
 ### Controllers
 
