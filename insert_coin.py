@@ -16,7 +16,7 @@ Controls (Xbox-style pad; keyboard in brackets)
 Options: --windowed   run in a window (for testing)
          --shot DIR   render sample screens to PNG files and exit (no display needed)
 """
-__version__ = "0.1.0"
+__version__ = "0.1.1"
 
 import json, os, re, sys, time, random, threading, subprocess, collections
 
@@ -124,7 +124,8 @@ class Library:
     def load(self):
         self.systems = []
         pls = {}
-        for f in sorted(os.listdir(f"{RA}/playlists")):
+        pdir = f"{RA}/playlists"
+        for f in sorted(os.listdir(pdir) if os.path.isdir(pdir) else []):
             if f.endswith(".lpl"):
                 d = self._read(f"{RA}/playlists/{f}")
                 if d: pls[f[:-4]] = d
@@ -490,6 +491,9 @@ class App:
     REPEAT_FIRST, REPEAT = 0.32, 0.075
 
     def press(self, act):
+        if not self.lib.systems:                                    # empty setup: only "exit" does anything
+            if act == "b": self.running = False
+            return
         if act in ("left", "right", "up", "down"):
             d = -1 if act in ("left", "up") else 1
             if self.screen_mode == "games" and act in ("up", "down"): d *= 10
@@ -711,8 +715,21 @@ class App:
         text(self.screen, self.fonts(26), "Starting…   (Select + Start quits the game)", (W / 2, H / 2 + 320), (180, 185, 200), anchor="midtop")
         pygame.display.flip()
 
+    def draw_empty(self):
+        self.draw_background((60, 70, 100))
+        self.draw_header("Insert Coin", "No games found")
+        lines = ["Insert Coin shows the games in your RetroArch playlists,",
+                 "but none were found in ~/.config/retroarch/playlists.",
+                 "", "Open RetroArch, use Import Content to scan your games,",
+                 "then start Insert Coin again."]
+        for n, ln in enumerate(lines):
+            text(self.screen, self.fonts(34), ln, (W / 2, 360 + n * 56), (220, 224, 235), anchor="midtop")
+        self.draw_hints([("B", "Exit")])
+
     def draw(self):
         self.img.pump()
+        if not self.lib.systems:
+            return self.draw_empty()
         {"systems": self.draw_systems, "games": self.draw_games, "quit": self.draw_quit}[self.screen_mode]()
         if self.toast and time.time() < self.toast[1]:
             f = self.fonts(30); w = f.size(self.toast[0])[0] + 60
@@ -734,15 +751,19 @@ class App:
         def snap(name):
             for _ in range(40): self.draw()                         # let animations settle
             pygame.image.save(self.screen, f"{self.shot}/{name}.png")
+        if not self.lib.systems:
+            print("No RetroArch playlists with games found - nothing to render."); pygame.quit(); return
         snap("1_systems")
-        self.si = next(i for i, s in enumerate(self.lib.systems) if s["id"] == "FBNeo - Arcade Games")
-        self.screen_mode = "games"
-        gs = self.games(); self.gi[self.sys["id"]] = next((k for k, g in enumerate(gs) if "super spy" in g.label.lower()), 0)
-        self.gpos = float(self.cur_gi()); self.lib.fav_paths = set(self.lib.fav_paths) | {self.cur_game().path}; time.sleep(1.5); snap("2_games_arcade")
-        self.si = next(i for i, s in enumerate(self.lib.systems) if s["id"].startswith("Nintendo - Super")); self.gpos = 0.0
-        self.jump_letter(1); self.jump_letter(1); self.gpos = float(self.cur_gi()); self.jump = None; snap("3_games_snes")
-        self.screen_mode = "systems"; self.si = 0; self.spos = 0.0; snap("4_systems_favorites")
-        self.screen_mode = "quit"; snap("5_quit")
+        # the two largest systems, a third of the way into each list, so neighbours are visible
+        big = sorted((i for i, s in enumerate(self.lib.systems) if not s["special"]),
+                     key=lambda i: -len(self.lib.systems[i]["games"]))[:2] or [0]
+        time.sleep(1.5)                                             # give the metadata thread a moment
+        for n, i in enumerate(big, 2):
+            self.si = i; self.screen_mode = "games"
+            self.gi[self.sys["id"]] = len(self.games()) // 3; self.gpos = float(self.cur_gi())
+            snap(f"{n}_games_{re.sub(r'[^a-z0-9]+', '_', self.sys['name'].lower())}")
+        self.screen_mode = "systems"; self.si = 0; self.spos = 0.0; snap(f"{len(big) + 2}_systems_first")
+        self.screen_mode = "quit"; snap(f"{len(big) + 3}_quit")
         pygame.quit()
 
 
