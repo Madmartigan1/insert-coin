@@ -14,19 +14,26 @@ OUT = os.path.join(HERE, "screenshots")
 APP = os.path.join(HERE, "..", "insert_coin.py")
 SIZE = (1280, 720)                                     # README images are scaled down to keep the repo small
 
-LIBRARY = {   # playlist name -> fictional games
-    "FBNeo - Arcade Games": ["Blaze Fist", "Cosmo Raiders", "Metal Moth", "Neon Brawlers", "Rocket Rally",
-                             "Sky Lancer", "Star Pilot X", "Thunder Alley", "Turbo Tanks", "Volt Viper"],
-    "Nintendo - Super Nintendo Entertainment System": [
-        "Aether Knights", "Bubble Brigade", "Crystal Lanterns", "Dune Runners", "Ember Quest", "Frostbite Falls",
-        "Gearworks Rally", "Harbor Heroes", "Iron Lotus", "Jade Comet", "Kite Wars", "Lunar Harvest",
-        "Moss Temple", "Nimbus Racer", "Orbit Odyssey"],
-    "Sega - Mega Drive - Genesis": ["Coral Kingdom", "Puzzle Pagoda", "Rogue Comet", "Sunset Striker",
-                                    "Thunder Circuit", "Wavebreaker"],
-    "Nintendo - Game Boy": ["Block Garden", "Pocket Planet", "Tiny Towers", "Lantern Lane"],
-    "Sony - PlayStation": ["Chrome Horizon", "Echo Protocol", "Glass Labyrinth", "Night Courier"],
-    "Atari - 2600": ["Comet Catch", "Space Snake", "Warp Fox"],
+# Fictional systems too, so the public images name no real consoles or companies.
+# playlist name -> (shown name, maker line, colour, fictional games)
+SYSTEMS = {
+    "Pixel Forge - Arcade Cabinet": ("Arcade Cabinet", "Coin-op classics", (226, 64, 64),
+        ["Blaze Fist", "Cosmo Raiders", "Metal Moth", "Neon Brawlers", "Rocket Rally",
+         "Sky Lancer", "Star Pilot X", "Thunder Alley", "Turbo Tanks", "Volt Viper"]),
+    "Pixel Forge - 16-Bit Console": ("16-Bit Console", "Pixel Forge", (110, 90, 200),
+        ["Aether Knights", "Bubble Brigade", "Crystal Lanterns", "Dune Runners", "Ember Quest", "Frostbite Falls",
+         "Gearworks Rally", "Harbor Heroes", "Iron Lotus", "Jade Comet", "Kite Wars", "Lunar Harvest",
+         "Moss Temple", "Nimbus Racer", "Orbit Odyssey"]),
+    "Pixel Forge - Mega 16": ("Mega 16", "Pixel Forge", (30, 110, 210),
+        ["Coral Kingdom", "Puzzle Pagoda", "Rogue Comet", "Sunset Striker", "Thunder Circuit", "Wavebreaker"]),
+    "Pixel Forge - Pocket Handheld": ("Pocket Handheld", "Pixel Forge", (140, 160, 60),
+        ["Block Garden", "Pocket Planet", "Tiny Towers", "Lantern Lane"]),
+    "Pixel Forge - 32-Bit Disc System": ("32-Bit Disc System", "Pixel Forge", (110, 120, 140),
+        ["Chrome Horizon", "Echo Protocol", "Glass Labyrinth", "Night Courier"]),
+    "Pixel Forge - 8-Bit Home Computer": ("8-Bit Home Computer", "Pixel Forge", (170, 110, 60),
+        ["Comet Catch", "Space Snake", "Warp Fox"]),
 }
+LIBRARY = {pl: v[3] for pl, v in SYSTEMS.items()}
 REGIONS = ["World", "USA", "Japan", "Europe"]
 FAVORITES = ["Ember Quest", "Neon Brawlers", "Chrome Horizon", "Coral Kingdom"]
 RECENT = ["Star Pilot X", "Ember Quest", "Tiny Towers", "Rogue Comet", "Echo Protocol"]
@@ -116,6 +123,8 @@ def main():
     pygame.init()
     build_home(pygame, root)
     m = runpy.run_path(APP, run_name="insert_coin_demo")
+    for k, (pl, (name, maker, colour, _)) in enumerate(SYSTEMS.items()):   # friendly names + order for the demo systems
+        m["FRIENDLY"][pl] = (name, maker, colour); m["ORDER"][pl] = k
     app = m["App"](shot=OUT); app.running = True
     time.strftime = lambda fmt, *a: "20:15"               # a fixed clock, so re-renders don't differ
     os.makedirs(OUT, exist_ok=True)
@@ -129,17 +138,17 @@ def main():
         app.si = next(i for i, s in enumerate(app.lib.systems) if s["id"] == pl); app.spos = float(app.si)
 
     app.style = "xbox"
-    go_system("FBNeo - Arcade Games"); save("home")
-    go_system("Nintendo - Super Nintendo Entertainment System"); app.screen_mode = "games"
+    go_system("Pixel Forge - Arcade Cabinet"); save("home")
+    go_system("Pixel Forge - 16-Bit Console"); app.screen_mode = "games"
     app.gi[app.sys["id"]] = next(k for k, g in enumerate(app.games()) if g.title == "Ember Quest")
     app.gpos = float(app.cur_gi()); save("games")
     app.si = 0; app.spos = 0.0; app.screen_mode = "games"; app.gpos = 0.0; save("favorites")
-    app.screen_mode = "systems"; go_system("Sony - PlayStation"); app.screen_mode = "quit"; app.quit_sel = 1; save("menu")
+    app.screen_mode = "systems"; go_system("Pixel Forge - 32-Bit Disc System"); app.screen_mode = "quit"; app.quit_sel = 1; save("menu")
     app.raw[1] = None
     app.start_setup(1, name="USB Gamepad", guid="demo", baseline={})
     app.setup["step"] = 4; save("controller_setup")
     # the button-hint bar in each controller style
-    app.setup = None; go_system("Nintendo - Super Nintendo Entertainment System"); app.screen_mode = "games"
+    app.setup = None; go_system("Pixel Forge - 16-Bit Console"); app.screen_mode = "games"
     W, H = app.screen.get_size(); strips = []
     for st in ("xbox", "playstation", "nintendo", "keyboard"):
         app.style = st
