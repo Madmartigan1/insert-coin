@@ -86,6 +86,14 @@ GLYPHS = {
 QUIT_COMBO = {"xbox": "Back + Start", "playstation": "Share + Options", "nintendo": "Minus + Plus", "keyboard": "Esc"}
 
 
+def quit_combo(style, name="", guid=""):
+    """The buttons that quit a game, as printed on this controller (PS3 pads say Select/Start)."""
+    product = guid[18:20] + guid[16:18] if len(guid) >= 20 else ""   # bytes 8-9 of the GUID, little-endian
+    if style == "playstation" and (product == "0268" or "ps3" in (name or "").lower() or "playstation(r)3" in (name or "").lower()):
+        return "Select + Start"
+    return QUIT_COMBO[style]
+
+
 def sanitize(s):
     return re.sub(r'[&*/:`<>?\\|"]', "_", s)
 
@@ -403,9 +411,10 @@ class App:
         self.meta = Meta({s["id"] for s in self.lib.systems if not s["special"]})
         self.img = Images(sync=bool(shot))
         self.pads = {}; self.pad_style = {}                         # device index -> Controller; instance id -> style
+        self.pad_quit = {}; self.cur_pad = None                    # instance id -> quit-combo words; last pad used
         self.style = "keyboard"                                    # button hints follow the last device used
         self.open_pads()
-        if self.pad_style: self.style = next(iter(self.pad_style.values()))
+        if self.pad_style: self.cur_pad, self.style = next(iter(self.pad_style.items()))
         self.screen_mode = "systems"                              # systems | games | quit
         self.si = next((i for i, s in enumerate(self.lib.systems) if not s["special"]), 0)
         self.gi = {}                                              # system id -> selected game index
@@ -428,7 +437,8 @@ class App:
                 try:
                     c = sdlc.Controller(i); self.pads[i] = c
                     j = c.as_joystick()
-                    self.pad_style[j.get_instance_id()] = controller_style(c.name, j.get_guid())
+                    st = controller_style(c.name, j.get_guid()); self.pad_style[j.get_instance_id()] = st
+                    self.pad_quit[j.get_instance_id()] = quit_combo(st, c.name, j.get_guid())
                 except Exception: pass
 
     # -- current state helpers
@@ -553,7 +563,7 @@ class App:
         if e.type == pygame.KEYDOWN: self.style = "keyboard"
         elif e.type in (pygame.CONTROLLERBUTTONDOWN, pygame.CONTROLLERAXISMOTION) and hasattr(e, "instance_id"):
             if e.type == pygame.CONTROLLERBUTTONDOWN or abs(e.value) > 16000:
-                self.style = self.pad_style.get(e.instance_id, self.style)
+                if e.instance_id in self.pad_style: self.cur_pad, self.style = e.instance_id, self.pad_style[e.instance_id]
         if e.type == pygame.QUIT: self.running = False
         elif e.type == pygame.KEYDOWN and e.key in K: self.set_hold(K[e.key], True)
         elif e.type == pygame.KEYUP and e.key in K: self.set_hold(K[e.key], False)
@@ -565,8 +575,8 @@ class App:
             self.set_hold(neg, v < -0.55); self.set_hold(pos, v > 0.55)
         elif e.type == pygame.CONTROLLERDEVICEADDED: self.open_pads()
         elif e.type == pygame.CONTROLLERDEVICEREMOVED:
-            self.pads = {}; self.pad_style = {}; self.open_pads()
-            if self.style != "keyboard": self.style = next(iter(self.pad_style.values()), "keyboard")
+            self.pads = {}; self.pad_style = {}; self.pad_quit = {}; self.open_pads()
+            if self.style != "keyboard": self.cur_pad, self.style = next(iter(self.pad_style.items()), (None, "keyboard"))
 
     def tick_repeat(self):
         now = time.time()
@@ -774,7 +784,7 @@ class App:
         im = self.img.get(g.thumb("Named_Boxarts"), 420, 520)
         if im: self.screen.blit(im, im.get_rect(center=(W / 2, H / 2 - 60)))
         text(self.screen, self.fonts(44, True), g.title, (W / 2, H / 2 + 250), anchor="midtop", maxw=1500)
-        text(self.screen, self.fonts(26), f"Starting…   ({QUIT_COMBO[self.style]} quits the game)", (W / 2, H / 2 + 320), (180, 185, 200), anchor="midtop")
+        text(self.screen, self.fonts(26), f"Starting…   ({self.pad_quit.get(self.cur_pad, QUIT_COMBO[self.style]) if self.style != 'keyboard' else 'Esc'} quits the game)", (W / 2, H / 2 + 320), (180, 185, 200), anchor="midtop")
         pygame.display.flip()
 
     def draw_empty(self):
