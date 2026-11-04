@@ -1191,8 +1191,14 @@ class App:
             if info: text(self.screen, self.fonts(28), "  ·  ".join(info), (cx, 846), (205, 210, 225), anchor="midtop", maxw=1250)
             if not g.core:
                 text(self.screen, self.fonts(24), "No core assigned", (cx, 892), (240, 150, 120), anchor="midtop")
-            elif g.versions:
-                text(self.screen, self.fonts(26, True), f"{len(g.versions)} versions", (cx, 892), (150, 200, 255), anchor="midtop")
+            elif g.versions:                                        # "3 versions · (X) to choose", with this pad's own X button
+                f1, f2 = self.fonts(26, True), self.fonts(26)
+                a, b = f"{len(g.versions)} versions  ·  ", "  to choose"
+                bw = self.draw_button("x", 0, 0, draw=False)
+                x0 = cx - (f1.size(a)[0] + bw + f2.size(b)[0]) / 2
+                text(self.screen, f1, a, (x0, 908), (150, 200, 255), anchor="midleft")
+                x1 = self.draw_button("x", x0 + f1.size(a)[0], 908)
+                text(self.screen, f2, b, (x1 - 10, 908), (190, 205, 230), anchor="midleft")
         else:
             text(self.screen, self.fonts(40), "No games here", (W / 2, H / 2), anchor="center")
         if self.jump and time.time() < self.jump[1]:
