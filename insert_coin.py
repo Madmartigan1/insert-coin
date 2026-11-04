@@ -12,7 +12,7 @@ Controls (Xbox-style pad; keyboard in brackets)
   Y                   toggle favorite [F]
   LB / RB             previous / next letter   [PageUp / PageDown]
   Menu sounds can be switched off in the B menu (saved in ~/.config/insert-coin/settings.json).
-  In a game: Select+Start quits back here, click both sticks for RetroArch's menu.
+  In a game: Select+Start opens the game menu (Resume / Quit game, or RetroArch's Quick Menu).
 
 Options: --windowed   run in a window (for testing)
          --shot DIR   render sample screens to PNG files and exit (no display needed)
@@ -69,10 +69,17 @@ FRIENDLY = {k: (n, m, c) for k, n, m, c in SYSTEMS}
 ORDER = {k: i for i, (k, *_ ) in enumerate(SYSTEMS)}
 
 LAUNCH_CFG = """# Written by Insert Coin: controller shortcuts while a game runs
-input_quit_gamepad_combo = "4"
+# Select + Start opens RetroArch's menu (Quick Menu > Resume / Close Content), like the built-in player's pause
+# menu; Close Content then returns to Insert Coin (only for games started from the command line, i.e. by us).
+input_quit_gamepad_combo = "0"
+input_menu_toggle_gamepad_combo = "4"
+quit_on_close_content = "2"
 quit_press_twice = "false"
-input_menu_toggle_gamepad_combo = "2"
 video_fullscreen = "true"
+"""
+# Added for `--windowed` (testing): a window, and nothing of this saved into retroarch.cfg
+LAUNCH_CFG_WINDOWED = """video_fullscreen = "false"
+config_save_on_exit = "false"
 """
 
 
@@ -682,6 +689,24 @@ class App:
                     if m: self.use_map(iid, m["map"])
                 except Exception: pass
 
+    def rescan_pads(self):
+        """After a game: controllers may have been unplugged or swapped while it ran, and those events were missed,
+        so rebuild the list from what is connected now. Hints follow the pad last used if it is still there."""
+        pygame.event.pump()
+        last = self.cur_pad
+        self.pads = {}; self.pad_style = {}; self.pad_quit = {}; self.raw = {}; self.raw_map = {}
+        self.open_pads()
+        now = list(self.pad_style)
+        if last in now: return
+        if now:
+            self.cur_pad, self.style = now[-1], self.pad_style[now[-1]]
+            name = next((c.name for c in self.pads.values() if c.as_joystick().get_instance_id() == now[-1]), "Controller")
+            log.info("Controller after the game: %s (%s)", name, self.style)
+        else:
+            self.cur_pad, self.style = None, "keyboard"
+        if self.raw and not now:
+            self.say("Controller connected - press a button on it to set it up", 3.0)
+
     def pad_plugged(self):
         """A controller was connected: the button hints switch to it straight away (not only after a button press)."""
         before = set(self.pad_style) | set(self.raw)
@@ -905,7 +930,8 @@ class App:
         self.sfx.play("coin"); self.draw(); self.splash(g, engine)
         self.sfx.finish(); self.sfx.close()                          # hand the audio device to the game
         os.makedirs(APPDIR, exist_ok=True); os.makedirs(LOGDIR, exist_ok=True)
-        with open(f"{APPDIR}/launch.cfg", "w") as f: f.write(LAUNCH_CFG)
+        with open(f"{APPDIR}/launch.cfg", "w") as f:
+            f.write(LAUNCH_CFG.replace('video_fullscreen = "true"\n', "") + LAUNCH_CFG_WINDOWED if self.windowed else LAUNCH_CFG)
         pygame.display.quit()
         kind = "engine" if engine else "retroarch"
         t0 = time.time(); ralog = f"{LOGDIR}/{kind}-last.log"; rc = None
@@ -934,7 +960,7 @@ class App:
         if engine and rc == 0 and took >= 3:
             try: self.lib.add_history(g)
             except Exception as e: log.warning("Could not update Recently Played: %s", e)
-        pygame.display.init(); self.open_display(); self.open_pads(); self.sfx.open()
+        pygame.display.init(); self.open_display(); self.rescan_pads(); self.sfx.open()
         self.img.cache.clear(); self.prev_bg = None
         pygame.event.clear(); self.hold.clear()
         sid, gid = self.sys["id"], self.cur_gi()
@@ -1297,7 +1323,7 @@ class App:
         im = self.img.get(g.thumb("Named_Boxarts"), 420, 520)
         if im: self.screen.blit(im, im.get_rect(center=(W / 2, H / 2 - 60)))
         text(self.screen, self.fonts(44, True), g.title, (W / 2, H / 2 + 250), anchor="midtop", maxw=1500)
-        text(self.screen, self.fonts(26), f"Starting…   ({self.pad_quit.get(self.cur_pad, QUIT_COMBO[self.style]) if self.style != 'keyboard' else 'Esc'} {'opens the game menu' if engine else 'quits the game'})", (W / 2, H / 2 + 320), (180, 185, 200), anchor="midtop")
+        text(self.screen, self.fonts(26), f"Starting…   ({self.pad_quit.get(self.cur_pad, QUIT_COMBO[self.style]) if self.style != 'keyboard' else 'Esc'} opens the game menu)", (W / 2, H / 2 + 320), (180, 185, 200), anchor="midtop")
         pygame.display.flip()
 
     def draw_empty(self):
