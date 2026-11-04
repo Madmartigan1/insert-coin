@@ -150,7 +150,7 @@ class AudioOut:
     """A small buffer between the core (which produces sound each frame) and the sound card. The core is
     run just fast enough to keep it filled, which also keeps the game at its own correct speed."""
     def __init__(self, rate):
-        self.buf = bytearray(); self.lock = threading.Lock(); self.rate = rate; self.produced = 0
+        self.buf = bytearray(); self.lock = threading.Lock(); self.rate = rate; self.produced = 0; self.closing = False
         self.target = int(rate * 0.05) * 4                    # aim for ~50 ms of sound queued
         self.limit = self.target * 4
         self.dev = sdla.AudioDevice(None, False, int(round(rate)), sdla.AUDIO_S16, 2, 512, 0, self._feed)
@@ -159,6 +159,7 @@ class AudioOut:
     def _feed(self, dev, view):
         try:                                                  # runs on SDL's audio thread: never let it raise
             mv = memoryview(view); n = mv.nbytes
+            if self.closing: mv[:] = bytes(n); return
             with self.lock:
                 take = min(n, len(self.buf)); mv[:take] = self.buf[:take]; del self.buf[:take]
             if take < n: mv[take:] = bytes(n - take)
@@ -172,10 +173,6 @@ class AudioOut:
 
     def queued(self):
         return len(self.buf)
-
-    def close(self):
-        try: self.dev.pause(1); self.dev.close()
-        except Exception: pass
 
 
 # ---------------------------------------------------------------- the player
@@ -720,7 +717,10 @@ class Player:
             wd = threading.Timer(8, watchdog); wd.daemon = True; wd.start()
             try: pygame.display.quit()                        # back to Insert Coin's screen straight away
             except Exception: pass
-            if self.audio: self.audio.close()
+            # The sound device is NOT closed here: closing it waits for SDL's audio thread, which may itself be
+            # waiting for Python's lock to call _feed - a deadlock (seen on 2026-11-04). main() leaves with
+            # os._exit instead, and the system releases the device.
+            if self.audio: self.audio.closing = True
             self.lib.retro_unload_game(); self.lib.retro_deinit()
             wd.cancel()
             if self.tmpdir: shutil.rmtree(self.tmpdir, ignore_errors=True)
@@ -749,7 +749,14 @@ def main():
             press.append((name.lower(), int(f0), int(f1)))
     title = a[a.index("--title") + 1] if "--title" in a else None
     p = Player(a[0], a[1], windowed="--windowed" in a, frames=frames, shot=shot, press=press, title=title)
-    p.run(); pygame.quit()
+    code = 0
+    try: p.run()
+    except BaseException as e:
+        if not isinstance(e, SystemExit):
+            import traceback; traceback.print_exc(file=sys.stdout)
+        log("ERROR", f"The player stopped with an error: {e!r}"); code = 1
+    # leave without pygame.quit(): it would close the sound device, which can deadlock (see Player.run)
+    sys.stdout.flush(); os._exit(code)
 
 
 if __name__ == "__main__":

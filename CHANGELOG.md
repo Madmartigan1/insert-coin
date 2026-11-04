@@ -4,6 +4,15 @@ All notable changes to Insert Coin. Versions follow [semantic versioning](https:
 before 1.0, minor versions add features and patch versions fix bugs.
 Each version is also a [GitHub Release](https://github.com/Madmartigan1/insert-coin/releases).
 
+## [Unreleased]
+
+### Fixed
+- **The built-in player could freeze while closing a game**, leaving a blank desktop as if
+  Insert Coin had quit (it was still running underneath). Closing the sound device could
+  deadlock with the sound thread, and the 8-second safety exit from 0.4.1 couldn't step in. The
+  player no longer closes the sound device itself: it writes the save, shuts the emulator down
+  and exits, and the system releases the sound device.
+
 ## [0.4.1] — 2026-11-04 · "Button masher"
 
 Set up the buttons for each game — handy for fighting games — and MAME's own Tab menu is back.
