@@ -403,7 +403,7 @@ class Fonts:
 # ---------------------------------------------------------------- sound effects
 class Sounds:
     """Menu sounds, synthesised at start-up, so there are no audio files. Silent if there is no audio device."""
-    # name -> notes: (start Hz, end Hz, seconds, wave, volume)
+    # name -> notes: (start Hz, end Hz, seconds, wave, volume[, decay]); a tuple of notes plays them together
     SPEC = {
         "move":    [(1250, 1250, .022, "tri", .30)],
         "system":  [(880, 880, .030, "tri", .32)],
@@ -411,7 +411,9 @@ class Sounds:
         "back":    [(620, 620, .045, "sq", .13), (415, 415, .08, "sq", .13)],
         "menu":    [(440, 880, .09, "tri", .30)],
         "jump":    [(500, 1500, .07, "tri", .26)],
-        "coin":    [(988, 988, .07, "sq", .16), (1319, 1319, .40, "sq", .16)],
+        # the credit counter ticking up, then a bell: Insert Coin's own coin-up sound
+        "coin":    [n for k in range(6) for n in ((1000 + 140 * k, 0, .028, "sq", .13), (0, 0, .014, "rest", 0))]
+                   + [(0, 0, .02, "rest", 0), ((2093, 2093, .45, "tri", .30, 2.2), (2093, 2093, .45, "sq", .06, 3))],
         "fav_on":  [(784, 784, .04, "tri", .32), (988, 988, .04, "tri", .32), (1319, 1319, .13, "tri", .32)],
         "fav_off": [(988, 988, .05, "tri", .30), (659, 659, .11, "tri", .30)],
         "error":   [(150, 120, .18, "sq", .13)],
@@ -433,14 +435,17 @@ class Sounds:
     @staticmethod
     def _synth(notes, rate, ch):
         import array
-        out = array.array("h"); phase = 0.0
-        for f0, f1, dur, wave, vol in notes:
-            n = int(rate * dur); attack = rate * .003
+        def note(f0, f1, dur, wave, vol, decay=1.5):
+            n = int(rate * dur); attack = rate * .003; phase = 0.0; f1 = f1 or f0; out = []
             for i in range(n):
                 t = i / n; phase = (phase + (f0 + (f1 - f0) * t) / rate) % 1.0
-                v = (1.0 if phase < .5 else -1.0) if wave == "sq" else 4 * abs(phase - .5) - 1
-                env = min(1.0, i / attack) * (1 - t) ** 1.5          # quick attack, smooth decay: no clicks
-                out.extend([int(v * env * vol * 32767)] * ch)
+                v = 0.0 if wave == "rest" else (1.0 if phase < .5 else -1.0) if wave == "sq" else 4 * abs(phase - .5) - 1
+                out.append(v * vol * min(1.0, i / attack) * (1 - t) ** decay)   # quick attack, smooth decay: no clicks
+            return out
+        out = array.array("h")
+        for nt in notes:
+            seg = [sum(v) for v in zip(*(note(*p) for p in nt))] if isinstance(nt[0], tuple) else note(*nt)
+            for v in seg: out.extend([int(max(-1.0, min(1.0, v)) * 32767)] * ch)
         return out.tobytes()
 
     def play(self, name):
@@ -451,7 +456,7 @@ class Sounds:
             self.last_tick = now; self.tick_chan.play(self.snd[name])
         else: self.snd[name].play()
 
-    def finish(self, limit=.7):
+    def finish(self, limit=1.0):
         """Let a playing sound end (before the audio device is handed to RetroArch)."""
         end = time.time() + limit
         while self.snd and pygame.mixer.get_busy() and time.time() < end: pygame.time.wait(10)
