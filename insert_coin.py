@@ -682,6 +682,22 @@ class App:
                     if m: self.use_map(iid, m["map"])
                 except Exception: pass
 
+    def pad_plugged(self):
+        """A controller was connected: the button hints switch to it straight away (not only after a button press)."""
+        before = set(self.pad_style) | set(self.raw)
+        self.open_pads()
+        new = [iid for iid in list(self.pad_style) + list(self.raw) if iid not in before]
+        if not new: return                                         # SDL also reports pads that were already there
+        iid = new[-1]
+        name = next((c.name for c in self.pads.values() if c.as_joystick().get_instance_id() == iid), None) or \
+               (self.raw[iid].get_name() if iid in self.raw else "Controller")
+        if iid in self.pad_style:
+            self.cur_pad, self.style = iid, self.pad_style[iid]
+            self.say(f"Controller connected: {name}")
+        else:
+            self.say(f"Controller connected: {name} - press a button on it to set it up", 3.0)
+        log.info("Controller connected: %s (%s)", name, self.pad_style.get(iid, "needs set-up"))
+
     # -- controller set-up for unrecognised pads
     def load_maps(self):
         try:
@@ -963,7 +979,7 @@ class App:
              pygame.CONTROLLER_BUTTON_START: "a", pygame.CONTROLLER_BUTTON_BACK: "b"}
         JOY = (pygame.JOYBUTTONDOWN, pygame.JOYBUTTONUP, pygame.JOYHATMOTION, pygame.JOYAXISMOTION)
         jid = getattr(e, "instance_id", None)
-        if e.type == pygame.JOYDEVICEADDED: self.open_pads()
+        if e.type == pygame.JOYDEVICEADDED: self.pad_plugged()
         elif e.type == pygame.JOYDEVICEREMOVED and jid in self.raw:
             if self.setup and self.setup["iid"] == jid: self.cancel_setup()
             for d in (self.raw, self.raw_map, self.pad_style, self.pad_quit): d.pop(jid, None)
@@ -1002,7 +1018,7 @@ class App:
             neg, pos = ("left", "right") if e.axis == pygame.CONTROLLER_AXIS_LEFTX else ("up", "down")
             v = e.value / 32767
             self.set_hold(neg, v < -0.55); self.set_hold(pos, v > 0.55)
-        elif e.type == pygame.CONTROLLERDEVICEADDED: self.open_pads()
+        elif e.type == pygame.CONTROLLERDEVICEADDED: self.pad_plugged()
         elif e.type == pygame.CONTROLLERDEVICEREMOVED:
             self.pads = {}; self.pad_style = {}; self.pad_quit = {}; self.open_pads()
             if self.style != "keyboard": self.cur_pad, self.style = next(iter(self.pad_style.items()), (None, "keyboard"))
