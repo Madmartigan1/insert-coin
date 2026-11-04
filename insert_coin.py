@@ -573,8 +573,11 @@ class Sounds:
 
 DEFAULT_SETTINGS = {"sound": True, "engine": False, "one_per_game": True}
 
-# Cores the built-in player (engine.py) runs; every other core still goes through RetroArch
-ENGINE_CORES = {"mesen_libretro.so", "fbneo_libretro.so", "mame2003_plus_libretro.so"}
+# cores the built-in player runs (all draw in software; each was test-booted). N64 needs the graphics card: RetroArch.
+ENGINE_CORES = {"mesen_libretro.so", "fbneo_libretro.so", "mame2003_plus_libretro.so", "mame2003_libretro.so",
+                "fbalpha2012_cps3_libretro.so", "mesen-s_libretro.so", "vbam_libretro.so", "blastem_libretro.so",
+                "picodrive_libretro.so", "mednafen_supergrafx_libretro.so", "mednafen_ngp_libretro.so",
+                "pcsx_rearmed_libretro.so", "stella_libretro.so"}
 HERE = os.path.dirname(os.path.abspath(__file__))
 
 def load_settings():
@@ -942,7 +945,16 @@ class App:
                 with open(ralog, "w") as out:
                     rc = subprocess.run([sys.executable, f"{HERE}/engine.py", g.core, g.path] + (["--windowed"] if self.windowed else []),
                                         stdout=out, stderr=subprocess.STDOUT).returncode
-            else:
+                if rc and time.time() - t0 < 10:                     # didn't start: let RetroArch try it instead
+                    log.warning("Built-in player could not start it (exit %s), trying RetroArch", rc)
+                    try:
+                        errs = [ln.rstrip() for ln in open(ralog, errors="replace") if "[ERROR]" in ln]
+                        for ln in errs[-5:]: log.warning("  engine: %s", ln)
+                    except Exception: pass
+                    engine, who, kind = False, "RetroArch", "retroarch"
+                    ralog = f"{LOGDIR}/retroarch-last.log"; t0 = time.time()
+                    if os.path.exists(ralog): os.replace(ralog, f"{LOGDIR}/retroarch-previous.log")
+            if not engine:
                 rc = subprocess.run(["retroarch", "--verbose", f"--log-file={ralog}", "-L", g.core, g.path,
                                      f"--appendconfig={APPDIR}/launch.cfg"],
                                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode

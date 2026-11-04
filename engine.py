@@ -23,7 +23,7 @@ from pygame._sdl2 import audio as sdla
 HOME = os.path.expanduser("~")
 RA = f"{HOME}/.config/retroarch"
 APPDIR = f"{HOME}/.local/share/insert-coin"
-SAVES = f"{APPDIR}/saves"
+SAVES = os.environ.get("INSERT_COIN_SAVES") or f"{APPDIR}/saves"      # override for tests
 # BIOS files: Insert Coin's own folder once it has one, else the one RetroArch uses (Neo Geo BIOS lives there)
 SYSTEM = f"{APPDIR}/system" if os.path.isdir(f"{APPDIR}/system") else f"{RA}/system"
 W, H = 1920, 1080
@@ -33,6 +33,27 @@ def split_archive(path):
     counts: folder names may contain '#' themselves (e.g. '# Translations #')."""
     m = re.search(r"(?i)\.(zip|7z)#", path)
     return (path[:m.end() - 1], path[m.end():]) if m else (path, "")
+
+def archive_names(path):
+    """The files inside a .zip or .7z."""
+    if path.lower().endswith(".zip"):
+        with zipfile.ZipFile(path) as z: return z.namelist()
+    out = sevenzip("l", "-slt", "-ba", path).decode(errors="replace")
+    return [ln[7:] for ln in out.splitlines() if ln.startswith("Path = ")]
+
+def archive_read(path, inner):
+    if path.lower().endswith(".zip"):
+        with zipfile.ZipFile(path) as z: return z.read(inner)
+    return sevenzip("e", "-so", path, inner)
+
+def sevenzip(*args):
+    """.7z archives are opened with the 7-Zip program (package p7zip-full / 7zip)."""
+    exe = shutil.which("7z") or shutil.which("7za") or shutil.which("7zz")
+    if not exe: raise SystemExit("[ERROR] This game is in a .7z archive: install 7-Zip (package p7zip-full or 7zip)")
+    import subprocess
+    r = subprocess.run([exe, *args], capture_output=True)
+    if r.returncode: raise SystemExit(f"[ERROR] 7-Zip could not read {os.path.basename(args[-2] if args[0] == 'e' else args[-1])}")
+    return r.stdout
 
 def log(level, msg): print(f"[{level}] {msg}", flush=True)
 
@@ -254,12 +275,12 @@ class Player:
         path, inner = split_archive(self.rom)
         if not os.path.exists(path): raise SystemExit(f"[ERROR] ROM not found: {path}")
         data = None
-        if not inner and path.lower().endswith(".zip") and "zip" not in exts:
-            with zipfile.ZipFile(path) as z:
-                inner = next((n for n in z.namelist() if n.rsplit(".", 1)[-1].lower() in exts), "")
+        kind = path.lower().rsplit(".", 1)[-1]
+        if not inner and kind in ("zip", "7z") and kind not in exts:
+            inner = next((n for n in archive_names(path) if n.rsplit(".", 1)[-1].lower() in exts), "")
             if not inner: raise SystemExit(f"[ERROR] No file the core can read inside {os.path.basename(path)}")
         if inner:
-            with zipfile.ZipFile(path) as z: data = z.read(inner)
+            data = archive_read(path, inner)
             self.tmpdir = tempfile.mkdtemp(prefix="insert-coin-")
             path = os.path.join(self.tmpdir, os.path.basename(inner))
             with open(path, "wb") as f: f.write(data)
