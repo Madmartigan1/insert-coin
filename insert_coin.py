@@ -2,14 +2,16 @@
 """Insert Coin - a controller-driven, console-style front end for RetroArch.
 
 It reads RetroArch's own playlists, thumbnails, favorites and history, and
-launches games through RetroArch with each game's assigned core. Nothing is
-duplicated: whatever works in RetroArch works here.
+launches games with each game's assigned core: through RetroArch, or in its own
+built-in player (engine.py, beta; B menu > Player). Nothing is duplicated:
+whatever works in RetroArch works here.
 
 Controls (Xbox-style pad; keyboard in brackets)
   D-pad / left stick  move            [arrows]
   A                   open / play     [Enter]
   B                   back            [Backspace / Esc]
   Y                   toggle favorite [F]
+  X                   versions of a game [V]
   LB / RB             previous / next letter   [PageUp / PageDown]
   Menu sounds can be switched off in the B menu (saved in ~/.config/insert-coin/settings.json).
   In a game: Select+Start opens the game menu (Resume / Quit game, or RetroArch's Quick Menu).
@@ -17,7 +19,7 @@ Controls (Xbox-style pad; keyboard in brackets)
 Options: --windowed   run in a window (for testing)
          --shot DIR   render sample screens to PNG files and exit (no display needed)
 """
-__version__ = "0.4.0.dev0"
+__version__ = "0.4.0"
 
 import json, os, re, sys, time, random, threading, subprocess, collections, logging, faulthandler, platform
 

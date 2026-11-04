@@ -4,6 +4,54 @@ All notable changes to Insert Coin. Versions follow [semantic versioning](https:
 before 1.0, minor versions add features and patch versions fix bugs.
 Each version is also a [GitHub Release](https://github.com/Madmartigan1/insert-coin/releases).
 
+## [0.4.0] — 2026-11-04 · "Player One"
+
+Insert Coin can now play games itself, and big collections are much tidier to browse.
+
+### New
+- **Built-in player** *(beta)*. Insert Coin can run games without RetroArch's window. It
+  loads the same emulator cores RetroArch uses and shows the picture with sharp, correctly
+  proportioned pixels, plays the sound at the game's own speed and reads every controller.
+  Switch it on with **B** on the home screen → **Player: Built-in (beta)**.
+  - Plays NES / Famicom, SNES, Game Boy, Game Boy Color, Game Boy Advance, Mega Drive /
+    Genesis, 32X, PC Engine, Neo Geo Pocket, PlayStation, Atari 2600, arcade and Neo Geo.
+    N64 still opens in RetroArch.
+  - **Select + Start** (or Esc) pauses the game with a **Resume / Quit game** menu.
+  - Battery saves go to Insert Coin's own folder; the first time you play a game, your
+    RetroArch save for it is copied in, so you carry on where you left off.
+  - Uses the core options you chose in RetroArch, and RetroArch's BIOS folder.
+  - Reads games in `.zip` and `.7z` archives (`.7z` needs the 7-Zip program).
+  - If it can't start a game, Insert Coin opens that game in RetroArch instead.
+  - Games played here appear in Recently Played.
+  - Not there yet: save states, rewind, fast-forward, shaders, core options, disc swapping.
+- **One entry per game.** The same game copied into several folders is now shown once, and
+  its versions — regions, revisions, fan translations — are grouped under one entry. The
+  best version is picked for you: one you have a save for, then a clean dump, then USA /
+  World, Europe, Japan. Press **X** to choose another; the note under the game says how many
+  there are and shows the button to press on *your* controller.
+- **Games: One per game / Show all.** **B** on the home screen → **Games** switches between the
+  tidy view and every ROM, instantly.
+- **The X button** has its own hint on every controller (blue X on Xbox, pink □ on
+  PlayStation, X on Switch / SNES-style, V on the keyboard), and the set-up screen for
+  unrecognised pads asks for it too (optional).
+
+### Changed
+- **Select + Start now opens a menu in every game** instead of quitting straight away: the
+  built-in player's pause menu, or RetroArch's *Quick Menu*, where **Close Content** returns
+  you to Insert Coin. Clicking both sticks no longer opens RetroArch's menu.
+- **Button hints switch as soon as you plug in a controller**, not only after you press one
+  of its buttons, with a short "Controller connected" message.
+- `--windowed` now runs games in a window too, RetroArch included (without changing your
+  RetroArch settings).
+
+### Fixed
+- Controllers swapped while a game was running were ignored afterwards, and the hints kept
+  showing the old pad's buttons. The controller list is now refreshed after every game.
+- Games inside folders whose names contain `#` (common for fan-translation collections)
+  failed to start, and disappeared from Favorites and Recently Played.
+- The "game closed straight away" warning no longer appears when you quit a game yourself
+  within a few seconds.
+
 ## [0.3.1] — 2026-11-04 · "Credit counter"
 
 ### Changed
