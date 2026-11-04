@@ -17,7 +17,7 @@ Controls (Xbox-style pad; keyboard in brackets)
 Options: --windowed   run in a window (for testing)
          --shot DIR   render sample screens to PNG files and exit (no display needed)
 """
-__version__ = "0.3.1"
+__version__ = "0.4.0.dev0"
 
 import json, os, re, sys, time, random, threading, subprocess, collections, logging, faulthandler, platform
 
@@ -251,6 +251,18 @@ class Library:
         self.fav_paths = {it.get("path") for it in items}
         return added
 
+    def add_history(self, g):
+        """Put a game at the top of Recently Played (the built-in player's job; RetroArch does it itself)."""
+        p = f"{RA}/content_history.lpl"
+        d = self._read(p) or {"version": "1.5", "items": []}
+        items = [it for it in d.get("items", []) if it.get("path") != g.path]
+        items.insert(0, {"path": g.path, "label": g.label, "core_path": g.core,
+                         "core_name": os.path.basename(g.core).replace("_libretro.so", ""), "crc32": "DETECT", "db_name": g.db or ""})
+        d["items"] = items[:200]; d.setdefault("version", "1.5")
+        tmp = p + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f: json.dump(d, f, indent=2)
+        os.replace(tmp, p)
+
 
 # ---------------------------------------------------------------- metadata (year / publisher) from RetroArch's databases
 def _rdb_load(path):
@@ -467,7 +479,11 @@ class Sounds:
         except Exception: pass
 
 
-DEFAULT_SETTINGS = {"sound": True}
+DEFAULT_SETTINGS = {"sound": True, "engine": False}
+
+# Cores the built-in player (engine.py) runs; every other core still goes through RetroArch
+ENGINE_CORES = {"mesen_libretro.so", "fbneo_libretro.so", "mame2003_plus_libretro.so"}
+HERE = os.path.dirname(os.path.abspath(__file__))
 
 def load_settings():
     try:
@@ -710,7 +726,16 @@ class App:
             if choice == "Resume": self.screen_mode = "systems"; self.sfx.play("back")
             elif choice == "Exit Insert Coin": self.running = False; log.info("Exit chosen from the menu")
             elif choice.startswith("Sound"): self.toggle_sound()
+            elif choice.startswith("Player"): self.toggle_engine()
             else: self.sfx.play("select"); self.setup_from_menu()
+
+    def toggle_engine(self):
+        self.settings["engine"] = not self.settings.get("engine")
+        try: save_settings(self.settings)
+        except Exception as e: self.say(f"Could not save the setting: {e}")
+        self.sfx.play("select")
+        self.say("Built-in player: NES, FBNeo and MAME 2003-Plus games run without RetroArch" if self.settings["engine"]
+                 else "All games run in RetroArch", 3.0)
 
     def toggle_sound(self):
         self.settings["sound"] = self.sfx.enabled = not self.sfx.enabled
@@ -750,30 +775,40 @@ class App:
             self.err("No core is set for this game yet - assign one in RetroArch"); return
         if not os.path.exists(g.path.split("#")[0]):
             self.err("ROM file not found"); return
-        self.sfx.play("coin"); self.draw(); self.splash(g)
-        self.sfx.finish(); self.sfx.close()                          # hand the audio device to RetroArch
-        os.makedirs(APPDIR, exist_ok=True)
+        engine = self.settings.get("engine") and os.path.basename(g.core) in ENGINE_CORES
+        who = "Built-in player" if engine else "RetroArch"
+        self.sfx.play("coin"); self.draw(); self.splash(g, engine)
+        self.sfx.finish(); self.sfx.close()                          # hand the audio device to the game
+        os.makedirs(APPDIR, exist_ok=True); os.makedirs(LOGDIR, exist_ok=True)
         with open(f"{APPDIR}/launch.cfg", "w") as f: f.write(LAUNCH_CFG)
         pygame.display.quit()
-        t0 = time.time(); ralog = f"{LOGDIR}/retroarch-last.log"; rc = None
-        log.info("Launch: %s | %s | %s", g.label, os.path.basename(g.core), g.path)
+        kind = "engine" if engine else "retroarch"
+        t0 = time.time(); ralog = f"{LOGDIR}/{kind}-last.log"; rc = None
+        log.info("Launch (%s): %s | %s | %s", who, g.label, os.path.basename(g.core), g.path)
         try:
-            os.makedirs(LOGDIR, exist_ok=True)
-            if os.path.exists(ralog): os.replace(ralog, f"{LOGDIR}/retroarch-previous.log")
-            rc = subprocess.run(["retroarch", "--verbose", f"--log-file={ralog}", "-L", g.core, g.path,
-                                 f"--appendconfig={APPDIR}/launch.cfg"],
-                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode
+            if os.path.exists(ralog): os.replace(ralog, f"{LOGDIR}/{kind}-previous.log")
+            if engine:
+                with open(ralog, "w") as out:
+                    rc = subprocess.run([sys.executable, f"{HERE}/engine.py", g.core, g.path] + (["--windowed"] if self.windowed else []),
+                                        stdout=out, stderr=subprocess.STDOUT).returncode
+            else:
+                rc = subprocess.run(["retroarch", "--verbose", f"--log-file={ralog}", "-L", g.core, g.path,
+                                     f"--appendconfig={APPDIR}/launch.cfg"],
+                                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode
         except Exception as e:
-            self.err(f"Could not start RetroArch: {e}")
+            self.err(f"Could not start {who}: {e}")
         took = time.time() - t0
         how = ("ended normally" if rc == 0 else f"was killed by signal {-rc} (crash)" if rc is not None and rc < 0
                else f"exited with code {rc}" if rc is not None else "did not start")
-        (log.info if rc == 0 else log.warning)("RetroArch %s after %d min %02d s (log: %s)", how, took // 60, took % 60, ralog)
+        (log.info if rc == 0 else log.warning)("%s %s after %d min %02d s (log: %s)", who, how, took // 60, took % 60, ralog)
         if rc:                                                       # keep the clues next to the event
             try:
                 errs = [ln.rstrip() for ln in open(ralog, errors="replace") if "[ERROR]" in ln or "[WARN]" in ln]
-                for ln in errs[-15:]: log.warning("  retroarch: %s", ln)
+                for ln in errs[-15:]: log.warning("  %s: %s", kind, ln)
             except Exception: pass
+        if engine and rc == 0 and took >= 3:
+            try: self.lib.add_history(g)
+            except Exception as e: log.warning("Could not update Recently Played: %s", e)
         pygame.display.init(); self.open_display(); self.open_pads(); self.sfx.open()
         self.img.cache.clear(); self.prev_bg = None
         pygame.event.clear(); self.hold.clear()
@@ -1051,7 +1086,8 @@ class App:
 
     @property
     def POWER_MENU(self):
-        return ("Resume", f"Sound: {'On' if self.sfx.enabled else 'Off'}", "Set up controller", "Exit Insert Coin")
+        return ("Resume", f"Sound: {'On' if self.sfx.enabled else 'Off'}",
+                f"Player: {'Built-in (beta)' if self.settings.get('engine') else 'RetroArch'}", "Set up controller", "Exit Insert Coin")
 
     def draw_quit(self):
         self.draw_systems(hints=False)
@@ -1094,12 +1130,12 @@ class App:
         text(self.screen, self.fonts(26), "Buttons, the d-pad and sticks all work.   Esc on the keyboard cancels.",
              (W / 2, H - 70), (170, 175, 190), anchor="midtop")
 
-    def splash(self, g):
+    def splash(self, g, engine=False):
         self.screen.fill((0, 0, 0))
         im = self.img.get(g.thumb("Named_Boxarts"), 420, 520)
         if im: self.screen.blit(im, im.get_rect(center=(W / 2, H / 2 - 60)))
         text(self.screen, self.fonts(44, True), g.title, (W / 2, H / 2 + 250), anchor="midtop", maxw=1500)
-        text(self.screen, self.fonts(26), f"Starting…   ({self.pad_quit.get(self.cur_pad, QUIT_COMBO[self.style]) if self.style != 'keyboard' else 'Esc'} quits the game)", (W / 2, H / 2 + 320), (180, 185, 200), anchor="midtop")
+        text(self.screen, self.fonts(26), f"Starting…   ({('hold ' if engine and self.style != 'keyboard' else '') + (self.pad_quit.get(self.cur_pad, QUIT_COMBO[self.style]) if self.style != 'keyboard' else 'Esc')} quits the game)", (W / 2, H / 2 + 320), (180, 185, 200), anchor="midtop")
         pygame.display.flip()
 
     def draw_empty(self):
