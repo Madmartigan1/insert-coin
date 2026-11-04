@@ -5,10 +5,15 @@ libretro is the small, MIT-licensed interface that emulator cores (Mesen, FBNeo,
 speak. This file is the "frontend" side of it: it loads a core, gives it the game, shows its picture,
 plays its sound, feeds it the controllers and keeps its save files.
 
-    engine.py CORE.so ROM [--windowed] [--frames N --shot FILE.png]
+    engine.py CORE.so ROM [--title NAME] [--windowed] [--frames N --shot FILE.png]
 
 ROM may be a plain file, a zip, or RetroArch-style "archive.zip#file.nes".
-In a game: Select + Start (or Esc) pauses and opens a small menu: Resume / Quit game.
+In a game: Select + Start (or Esc) pauses and opens a small menu: Resume / Controls / Quit game.
+Controls changes which button does what, for this game only (saved per game). The keyboard is
+also passed to the core, so e.g. Tab opens MAME's own menu in arcade games.
+
+Testing: --press NAME@FIRST-LAST holds a button during those frames (a RetroPad name such as
+"start" or "b", or a keyboard key such as "tab"); repeat it for more presses.
 
 Supported so far: cores that draw in software (NES, SNES, Mega Drive, Game Boy, arcade, Neo Geo...).
 Cores that need the graphics card (N64, some PS1 modes) are a later step.
@@ -26,6 +31,7 @@ APPDIR = f"{HOME}/.local/share/insert-coin"
 SAVES = os.environ.get("INSERT_COIN_SAVES") or f"{APPDIR}/saves"      # override for tests
 # BIOS files: Insert Coin's own folder once it has one, else the one RetroArch uses (Neo Geo BIOS lives there)
 SYSTEM = f"{APPDIR}/system" if os.path.isdir(f"{APPDIR}/system") else f"{RA}/system"
+CONFDIR = os.environ.get("INSERT_COIN_CONFIG") or f"{HOME}/.config/insert-coin"
 W, H = 1920, 1080
 
 def split_archive(path):
@@ -78,6 +84,10 @@ class GameInfo(C.Structure):
 class Variable(C.Structure):
     _fields_ = [("key", C.c_char_p), ("value", C.c_char_p)]
 
+class InputDescriptor(C.Structure):
+    _fields_ = [("port", C.c_uint), ("device", C.c_uint), ("index", C.c_uint), ("id", C.c_uint),
+                ("description", C.c_char_p)]
+
 class Message(C.Structure):
     _fields_ = [("msg", C.c_char_p), ("frames", C.c_uint)]
 
@@ -89,11 +99,45 @@ POLL_T = C.CFUNCTYPE(None)
 STATE_T = C.CFUNCTYPE(C.c_int16, C.c_uint, C.c_uint, C.c_uint, C.c_uint)
 LOG_T = C.CFUNCTYPE(None, C.c_int, C.c_char_p)          # really printf-style; only the format string is read
 
-DEVICE_JOYPAD, DEVICE_ANALOG = 1, 5
+DEVICE_JOYPAD, DEVICE_KEYBOARD, DEVICE_ANALOG = 1, 3, 5
 ID_MASK = 256                                            # "all buttons as a bitmask" (GET_INPUT_BITMASKS)
 MEMORY_SAVE_RAM = 0
 # RetroPad ids: B Y SELECT START UP DOWN LEFT RIGHT A X L R L2 R2 L3 R3
 B_, Y_, SELECT, START, UP, DOWN, LEFT, RIGHT, A_, X_, L_, R_, L2, R2, L3, R3 = range(16)
+RETROPAD_NAMES = {"b": B_, "y": Y_, "select": SELECT, "start": START, "up": UP, "down": DOWN, "left": LEFT,
+                  "right": RIGHT, "a": A_, "x": X_, "l": L_, "r": R_, "l2": L2, "r2": R2, "l3": L3, "r3": R3}
+# the buttons a game can have, in the order the Controls screen lists them (the d-pad isn't remappable)
+REMAPPABLE = [B_, A_, Y_, X_, L_, R_, L2, R2, L3, R3, SELECT, START]
+GENERIC_NAMES = {B_: "B", A_: "A", Y_: "Y", X_: "X", L_: "L", R_: "R", L2: "L2", R2: "R2", L3: "L3", R3: "R3",
+                 SELECT: "Select", START: "Start"}
+# what each RetroPad button is called on the controller in your hand (they sit by position: B bottom, A right,
+# Y left, X top)
+PAD_LABELS = {
+    "xbox": {B_: "A", A_: "B", Y_: "X", X_: "Y", L_: "LB", R_: "RB", L2: "LT", R2: "RT", L3: "LS", R3: "RS",
+             SELECT: "Back", START: "Start"},
+    "playstation": {B_: "\u2715", A_: "\u25cb", Y_: "\u25a1", X_: "\u25b3", L_: "L1", R_: "R1", L2: "L2", R2: "R2",
+                    L3: "L3", R3: "R3", SELECT: "Select", START: "Start"},
+    "nintendo": {B_: "B", A_: "A", Y_: "Y", X_: "X", L_: "L", R_: "R", L2: "ZL", R2: "ZR", L3: "LS", R3: "RS",
+                 SELECT: "\u2212", START: "+"},
+    "keyboard": {B_: "Z", A_: "X", Y_: "A", X_: "S", L_: "Q", R_: "W", L2: "-", R2: "-", L3: "-", R3: "-",
+                 SELECT: "R-Shift", START: "Enter"},
+}
+PAD_LABELS["snes"] = {**PAD_LABELS["nintendo"], SELECT: "Select", START: "Start"}
+PAD_LABELS["generic"] = PAD_LABELS["xbox"]
+
+
+def retro_keymap():
+    """libretro key codes (SDL 1.2 numbering) -> pygame keys, for passing the keyboard to the core."""
+    k = {c: c for c in list(range(32, 127)) + [8, 9, 13, 127]}   # printable keys, Backspace, Tab, Return, Delete
+    k.pop(27, None)                                               # Esc belongs to Insert Coin (the pause menu)
+    for i in range(10): k[256 + i] = getattr(pygame, f"K_KP{i}", None) or getattr(pygame, f"K_KP_{i}")
+    k.update({266: pygame.K_KP_PERIOD, 267: pygame.K_KP_DIVIDE, 268: pygame.K_KP_MULTIPLY, 269: pygame.K_KP_MINUS,
+              270: pygame.K_KP_PLUS, 271: pygame.K_KP_ENTER, 273: pygame.K_UP, 274: pygame.K_DOWN, 275: pygame.K_RIGHT,
+              276: pygame.K_LEFT, 277: pygame.K_INSERT, 278: pygame.K_HOME, 279: pygame.K_END, 280: pygame.K_PAGEUP,
+              281: pygame.K_PAGEDOWN, 303: pygame.K_RSHIFT, 304: pygame.K_LSHIFT, 305: pygame.K_RCTRL,
+              306: pygame.K_LCTRL, 307: pygame.K_RALT, 308: pygame.K_LALT})
+    for i in range(1, 16): k[281 + i] = getattr(pygame, f"K_F{i}")
+    return k
 
 # libretro pixel formats -> (bytes per pixel, surface depth, colour masks)
 PIXFMT = {0: (2, 16, (0x7C00, 0x03E0, 0x001F, 0)),      # 0RGB1555 (the default)
@@ -136,7 +180,7 @@ class AudioOut:
 
 # ---------------------------------------------------------------- the player
 class Player:
-    def __init__(self, core_path, rom, windowed=False, frames=None, shot=None):
+    def __init__(self, core_path, rom, windowed=False, frames=None, shot=None, press=None, title=None):
         self.core_path, self.rom, self.frames_left, self.shot = core_path, rom, frames, shot
         self.lib = C.CDLL(core_path)
         self.keep = []                                        # ctypes objects the core holds pointers to
@@ -144,6 +188,10 @@ class Player:
         self.pixfmt = 0; self.rotation = 0; self.frame = None; self.surf = None
         self.running = True; self.audio = None; self.tmpdir = None
         self.paused = False; self.menu_sel = 0; self.combo_down = False
+        self.mode = "pause"                                   # pause menu: "pause", "controls" or "wait" (for a button)
+        self.descs = {}; self.remap = {}; self.ctl_sel = 0; self.wait_until = 0; self.style = "keyboard"
+        self.fno = 0; self.press = press or []; self.bits = [0]; self.sticks = []
+        self.keymap = None; self.title = title; self.keys = (); self.held_keys = set()
         fp = pygame.font.match_font("ubuntu,notosans,dejavusans", bold=True)
         self.font = lambda n, _c={}: _c.setdefault(n, pygame.font.Font(fp, n))
         self.av = AVInfo()                                    # some cores report their size while loading
@@ -152,6 +200,7 @@ class Player:
         self.screen = pygame.display.set_mode((W, H), flags, vsync=0 if shot else 1)
         pygame.display.set_caption("Insert Coin"); pygame.mouse.set_visible(False)
         self.pads = []; self.open_pads()
+        if self.pads: self.style = self.pads[0][1]
 
         self.info = SystemInfo(); self.lib.retro_get_system_info(C.byref(self.info))
         self.name = self.info.library_name.decode(errors="replace")
@@ -176,7 +225,8 @@ class Player:
         for port in range(2): L.retro_set_controller_port_device(port, DEVICE_JOYPAD)
         try: self.audio = AudioOut(t.sample_rate)
         except Exception as e: log("WARN", f"No sound: {e}")
-        self.load_sram()
+        self.load_sram(); self.load_remap()
+        self.keymap = {rk: pk for rk, pk in retro_keymap().items() if pk not in self.KEYS}   # pad keys stay pad keys
         self.clock = pygame.time.Clock()
 
     # -- core options: the core's defaults, with the user's RetroArch choices on top
@@ -218,7 +268,15 @@ class Player:
                 f = C.cast(data, C.POINTER(C.c_int))[0]
                 if f in PIXFMT: self.pixfmt = f; self.surf = None; return True
                 return False
-            if cmd in (11, 34, 35, 36, 42, 44, 53, 55, 63, 65, 69): return True       # info we can safely accept
+            if cmd == 11:                                    # SET_INPUT_DESCRIPTORS: the game's names for its buttons
+                arr = C.cast(data, C.POINTER(InputDescriptor)); i = 0; d = {}
+                while arr[i].description:
+                    x = arr[i]
+                    if x.port == 0 and x.device & 0xFF == DEVICE_JOYPAD and x.id in REMAPPABLE:
+                        d.setdefault(x.id, x.description.decode(errors="replace").strip())
+                    i += 1
+                self.descs = d; return True
+            if cmd in (34, 35, 36, 42, 44, 53, 55, 63, 65, 69): return True           # info we can safely accept
             if cmd == 15:                                    # GET_VARIABLE
                 v = C.cast(data, C.POINTER(Variable))[0]
                 val = self.opt_value(v.key.decode()) if v.key else None
@@ -234,7 +292,7 @@ class Player:
             if cmd == 17: C.cast(data, C.POINTER(C.c_bool))[0] = False; return True    # GET_VARIABLE_UPDATE
             if cmd == 18: return True                        # SET_SUPPORT_NO_GAME
             if cmd == 19: return self.give_string(data, self.core_path)                 # GET_LIBRETRO_PATH
-            if cmd == 24: C.cast(data, C.POINTER(C.c_uint64))[0] = (1 << DEVICE_JOYPAD) | (1 << DEVICE_ANALOG); return True
+            if cmd == 24: C.cast(data, C.POINTER(C.c_uint64))[0] = (1 << DEVICE_JOYPAD) | (1 << DEVICE_KEYBOARD) | (1 << DEVICE_ANALOG); return True
             if cmd == 27:                                    # GET_LOG_INTERFACE
                 C.cast(data, C.POINTER(C.c_void_p))[0] = C.cast(self.log_cb, C.c_void_p).value; return True
             if cmd == 32:                                    # SET_SYSTEM_AV_INFO
@@ -316,6 +374,56 @@ class Player:
         with open(tmp, "wb") as f: f.write(C.string_at(ptr, size))
         os.replace(tmp, self.sram_path())
 
+    # -- per-game button layout ("Controls" in the pause menu)
+    def remap_path(self): return f"{CONFDIR}/remaps/{self.name}/{self.game_name}.json"
+
+    def load_remap(self):
+        try:
+            m = json.load(open(self.remap_path()))["map"]
+            self.remap = {int(t): int(s) for t, s in m.items() if int(t) in REMAPPABLE and int(s) in REMAPPABLE}
+            if self.remap: log("INFO", f"Using this game's own button layout ({len(self.remap)} changed)")
+        except (OSError, ValueError, KeyError, TypeError):
+            self.remap = {}
+
+    def save_remap(self):
+        try:
+            p = self.remap_path()
+            if not self.remap:
+                if os.path.exists(p): os.remove(p)
+                return
+            os.makedirs(os.path.dirname(p), exist_ok=True)
+            with open(p + ".tmp", "w") as f: json.dump({"map": {str(t): s for t, s in self.remap.items()}}, f, indent=1)
+            os.replace(p + ".tmp", p)
+        except OSError as e:
+            log("WARN", f"Could not save the button layout: {e}")
+
+    def assign(self, target, source):
+        """The button in your hand that used to give `source` now gives the game's `target`; whichever game button
+        it gave before takes over target's old button, so no button does two things and none is lost."""
+        cur = lambda t: self.remap.get(t, t)
+        old = cur(target)
+        other = next((t for t in REMAPPABLE if t != target and cur(t) == source), None)
+        self.remap[target] = source
+        if other is not None: self.remap[other] = old
+        self.remap = {t: s for t, s in self.remap.items() if t != s}
+        self.save_remap()
+        log("INFO", f"Controls: {self.button_name(target)} on {self.pad_label(source)}")
+
+    def apply_remap(self, bits):
+        if not self.remap: return bits
+        out = bits & ~sum(1 << t for t in REMAPPABLE)
+        for t in REMAPPABLE:
+            if bits >> self.remap.get(t, t) & 1: out |= 1 << t
+        return out
+
+    def targets(self):
+        """The game's buttons: the ones the core named, or the usual set if it named none."""
+        return [t for t in REMAPPABLE if t in self.descs] or [B_, A_, Y_, X_, L_, R_, SELECT, START]
+
+    def button_name(self, t): return self.descs.get(t) or GENERIC_NAMES[t]
+
+    def pad_label(self, rid): return PAD_LABELS.get(self.style, PAD_LABELS["xbox"]).get(rid, "?")
+
     # -- picture
     def video(self, data, w, h, pitch):
         if not data: return                                  # "same frame as before"
@@ -372,15 +480,13 @@ class Player:
             self.pads = pads
             log("INFO", "Controllers: " + (", ".join(f"{c.name} ({s})" for c, s in pads) or "keyboard only"))
 
-    def pad_bits(self, c, style):
-        b = sdlc
-        g = c.get_button
-        def ax(a): return c.get_axis(a) / 32767
-        bits = 0
+    @staticmethod
+    def button_pairs(style):
+        """(RetroPad id, SDL button) for a controller family."""
         # RetroPad buttons sit by position (B bottom, A right). SDL already reports Xbox, PlayStation and SNES-replica
         # pads by position; Nintendo's own pads are reported by printed label, so their letters line up directly.
         nin = style == "nintendo"
-        pairs = [(B_, pygame.CONTROLLER_BUTTON_B if nin else pygame.CONTROLLER_BUTTON_A),
+        return [(B_, pygame.CONTROLLER_BUTTON_B if nin else pygame.CONTROLLER_BUTTON_A),
                  (A_, pygame.CONTROLLER_BUTTON_A if nin else pygame.CONTROLLER_BUTTON_B),
                  (Y_, pygame.CONTROLLER_BUTTON_Y if nin else pygame.CONTROLLER_BUTTON_X),
                  (X_, pygame.CONTROLLER_BUTTON_X if nin else pygame.CONTROLLER_BUTTON_Y),
@@ -389,7 +495,12 @@ class Player:
                  (L3, pygame.CONTROLLER_BUTTON_LEFTSTICK), (R3, pygame.CONTROLLER_BUTTON_RIGHTSTICK),
                  (UP, pygame.CONTROLLER_BUTTON_DPAD_UP), (DOWN, pygame.CONTROLLER_BUTTON_DPAD_DOWN),
                  (LEFT, pygame.CONTROLLER_BUTTON_DPAD_LEFT), (RIGHT, pygame.CONTROLLER_BUTTON_DPAD_RIGHT)]
-        for rid, btn in pairs:
+
+    def pad_bits(self, c, style):
+        g = c.get_button
+        def ax(a): return c.get_axis(a) / 32767
+        bits = 0
+        for rid, btn in self.button_pairs(style):
             if g(btn): bits |= 1 << rid
         if ax(pygame.CONTROLLER_AXIS_TRIGGERLEFT) > .5: bits |= 1 << L2
         if ax(pygame.CONTROLLER_AXIS_TRIGGERRIGHT) > .5: bits |= 1 << R2
@@ -405,10 +516,18 @@ class Player:
             pygame.K_RETURN: START, pygame.K_RSHIFT: SELECT, pygame.K_BACKSPACE: SELECT}
 
     def poll(self):
+        self.fno += 1
         keys = pygame.key.get_pressed()
         kb = sum(1 << rid for k, rid in self.KEYS.items() if keys[k])
-        self.bits = [self.pad_bits(c, s) for c, s in self.pads] or [0]
-        self.bits[0] |= kb
+        bits = [self.pad_bits(c, s) for c, s in self.pads] or [0]
+        bits[0] |= kb
+        self.held_keys = set()
+        for name, a, b in self.press:                         # test presses (--press)
+            if a <= self.fno <= b:
+                if name in RETROPAD_NAMES: bits[0] |= 1 << RETROPAD_NAMES[name]
+                else: self.held_keys.add(pygame.key.key_code(name))
+        self.keys = keys
+        self.bits = [self.apply_remap(b) for b in bits]
         self.sticks = [[(c.get_axis(pygame.CONTROLLER_AXIS_LEFTX), c.get_axis(pygame.CONTROLLER_AXIS_LEFTY)),
                         (c.get_axis(pygame.CONTROLLER_AXIS_RIGHTX), c.get_axis(pygame.CONTROLLER_AXIS_RIGHTY))]
                        for c, _ in self.pads]
@@ -419,19 +538,51 @@ class Player:
             bits = self.bits[port] if port < len(self.bits) else 0
             if id_ == ID_MASK: return bits - 0x10000 if bits & 0x8000 else bits   # as a signed 16-bit value
             return 1 if bits >> id_ & 1 else 0
+        if device == DEVICE_KEYBOARD:                          # the keyboard, for cores that read it (MAME: Tab menu, ...)
+            pk = self.keymap.get(id_) if self.keymap else None
+            if pk is None or self.paused: return 0
+            try: return 1 if self.keys[pk] or pk in self.held_keys else 0
+            except (IndexError, AttributeError): return 0
         if device == DEVICE_ANALOG and port < len(self.sticks) and index < 2 and id_ < 2:
             return max(-32767, min(32767, self.sticks[port][index][id_]))
         return 0
 
     # -- main loop
-    MENU = ("Resume", "Quit game")
+    MENU = ("Resume", "Controls", "Quit game")
+    WAIT_S = 5                                               # seconds to press a button before it gives up
+
+    def pad_style(self, iid):
+        for c, st in self.pads:
+            try:
+                if c.as_joystick().get_instance_id() == iid: return st
+            except Exception: pass
+        return self.pads[0][1] if self.pads else "keyboard"
 
     def events(self):
         for e in pygame.event.get():
-            if e.type == pygame.QUIT: self.running = False
-            elif e.type in (pygame.CONTROLLERDEVICEADDED, pygame.CONTROLLERDEVICEREMOVED): self.open_pads()
-            elif e.type == pygame.KEYDOWN:
-                if e.key == pygame.K_ESCAPE: self.set_pause(not self.paused)
+            if e.type == pygame.QUIT: self.running = False; continue
+            if e.type in (pygame.CONTROLLERDEVICEADDED, pygame.CONTROLLERDEVICEREMOVED): self.open_pads(); continue
+            if e.type == pygame.CONTROLLERBUTTONDOWN: self.style = self.pad_style(e.instance_id)
+            elif e.type == pygame.KEYDOWN and e.key != pygame.K_ESCAPE: self.style = "keyboard"
+            if self.paused and self.mode == "wait":            # waiting for the button to give a game action
+                src = None
+                if e.type == pygame.CONTROLLERBUTTONDOWN:
+                    src = next((rid for rid, b in self.button_pairs(self.style) if b == e.button and rid in REMAPPABLE), None)
+                elif e.type == pygame.CONTROLLERAXISMOTION and e.value > 16000 and e.axis in (
+                        pygame.CONTROLLER_AXIS_TRIGGERLEFT, pygame.CONTROLLER_AXIS_TRIGGERRIGHT):
+                    self.style = self.pad_style(e.instance_id)
+                    src = L2 if e.axis == pygame.CONTROLLER_AXIS_TRIGGERLEFT else R2
+                elif e.type == pygame.KEYDOWN:
+                    if e.key == pygame.K_ESCAPE: self.mode = "controls"; continue
+                    src = self.KEYS.get(e.key)
+                    if src not in REMAPPABLE: src = None
+                if src is not None:
+                    self.assign(self.targets()[self.ctl_sel], src); self.mode = "controls"
+                continue
+            if e.type == pygame.KEYDOWN:
+                if e.key == pygame.K_ESCAPE:
+                    if self.paused and self.mode == "controls": self.mode = "pause"
+                    else: self.set_pause(not self.paused)
                 elif self.paused: self.menu_key({pygame.K_UP: "up", pygame.K_DOWN: "down", pygame.K_RETURN: "ok",
                                                  pygame.K_KP_ENTER: "ok", pygame.K_BACKSPACE: "back"}.get(e.key))
             elif e.type == pygame.CONTROLLERBUTTONDOWN and self.paused:
@@ -439,26 +590,45 @@ class Player:
                                pygame.CONTROLLER_BUTTON_A: "ok", pygame.CONTROLLER_BUTTON_B: "back"}.get(e.button))
             elif e.type == pygame.CONTROLLERAXISMOTION and self.paused and e.axis == pygame.CONTROLLER_AXIS_LEFTY and abs(e.value) > 20000:
                 self.menu_key("up" if e.value < 0 else "down")
+        if self.paused and self.mode == "wait" and time.time() > self.wait_until: self.mode = "controls"
         # Select + Start together (on any pad) opens the menu; a second press closes it
         both = any(c.get_button(pygame.CONTROLLER_BUTTON_BACK) and c.get_button(pygame.CONTROLLER_BUTTON_START) for c, _ in self.pads)
         if both and not self.combo_down: self.set_pause(not self.paused)
         self.combo_down = both
 
     def set_pause(self, on):
-        self.paused = on; self.menu_sel = 0
+        self.paused = on; self.menu_sel = 0; self.mode = "pause"
         if not on and self.audio:
             with self.audio.lock: self.audio.buf.clear()          # no stale sound after a pause
         log("INFO", "Paused" if on else "Resumed")
 
     def menu_key(self, k):
+        if self.mode == "controls": return self.controls_key(k)
         if k == "up": self.menu_sel = (self.menu_sel - 1) % len(self.MENU)
         elif k == "down": self.menu_sel = (self.menu_sel + 1) % len(self.MENU)
         elif k == "back": self.set_pause(False)
         elif k == "ok":
-            if self.MENU[self.menu_sel] == "Resume": self.set_pause(False)
+            item = self.MENU[self.menu_sel]
+            if item == "Resume": self.set_pause(False)
+            elif item == "Controls": self.mode = "controls"; self.ctl_sel = 0
             else: log("INFO", "Quit chosen from the game menu"); self.running = False
 
+    def controls_rows(self): return self.targets() + ["reset", "done"]
+
+    def controls_key(self, k):
+        rows = self.controls_rows()
+        if k == "up": self.ctl_sel = (self.ctl_sel - 1) % len(rows)
+        elif k == "down": self.ctl_sel = (self.ctl_sel + 1) % len(rows)
+        elif k == "back": self.mode = "pause"
+        elif k == "ok":
+            r = rows[self.ctl_sel]
+            if r == "done": self.mode = "pause"
+            elif r == "reset":
+                self.remap = {}; self.save_remap(); log("INFO", "Controls: back to the standard layout")
+            else: self.mode = "wait"; self.wait_until = time.time() + self.WAIT_S
+
     def draw_menu(self):
+        if getattr(self, "mode", "pause") != "pause": return self.draw_controls()
         dim = pygame.Surface((W, H), pygame.SRCALPHA); dim.fill((0, 0, 0, 160)); self.screen.blit(dim, (0, 0))
         box = pygame.Rect(0, 0, 560, 150 + 96 * len(self.MENU)); box.center = (W // 2, H // 2)
         pygame.draw.rect(self.screen, (28, 30, 42), box, border_radius=28)
@@ -469,6 +639,54 @@ class Player:
             on = k == self.menu_sel
             pygame.draw.rect(self.screen, (230, 232, 240) if on else (55, 58, 75), r, border_radius=20)
             t = self.font(32).render(label, True, (20, 22, 30) if on else (230, 232, 240)); self.screen.blit(t, t.get_rect(center=r.center))
+
+    def glyph(self, text, center, on=False):
+        """A button as printed on the pad, in a small pill."""
+        f = self.symfont(30)
+        t = f.render(text, True, (20, 22, 30) if not on else (255, 255, 255))
+        r = pygame.Rect(0, 0, max(64, t.get_width() + 32), 50); r.center = center
+        pygame.draw.rect(self.screen, (200, 204, 216) if not on else (60, 64, 84), r, border_radius=25)
+        self.screen.blit(t, t.get_rect(center=r.center))
+
+    def symfont(self, n, _c={}):
+        if n not in _c:
+            fp = pygame.font.match_font("dejavusans,notosanssymbols,notosans", bold=True)   # has the PlayStation shapes
+            _c[n] = pygame.font.Font(fp, n)
+        return _c[n]
+
+    def draw_controls(self):
+        dim = pygame.Surface((W, H), pygame.SRCALPHA); dim.fill((0, 0, 0, 190)); self.screen.blit(dim, (0, 0))
+        rows = self.controls_rows(); show = 13; rh = 56
+        top = max(0, min(self.ctl_sel - show // 2, len(rows) - show))
+        vis = rows[top:top + show]
+        box = pygame.Rect(0, 0, 900, 220 + rh * len(vis)); box.center = (W // 2, H // 2)
+        pygame.draw.rect(self.screen, (28, 30, 42), box, border_radius=28)
+        pygame.draw.rect(self.screen, (90, 95, 115), box, 3, border_radius=28)
+        t = self.font(40).render("Controls", True, (255, 255, 255)); self.screen.blit(t, t.get_rect(midtop=(W // 2, box.top + 30)))
+        t = self.font(24).render(f"For this game only  \u00b7  {self.title or self.game_name}"[:80], True, (160, 165, 185))
+        self.screen.blit(t, t.get_rect(midtop=(W // 2, box.top + 84)))
+        for k, r in enumerate(vis):
+            i = top + k; on = i == self.ctl_sel
+            row = pygame.Rect(0, 0, 780, rh - 10); row.midtop = (W // 2, box.top + 130 + k * rh)
+            pygame.draw.rect(self.screen, (230, 232, 240) if on else (45, 48, 64), row, border_radius=18)
+            col = (20, 22, 30) if on else (230, 232, 240)
+            if r in ("reset", "done"):
+                label = "Reset to standard layout" if r == "reset" else "Done"
+                t = self.font(28).render(label, True, col); self.screen.blit(t, t.get_rect(center=row.center))
+                continue
+            name = self.button_name(r)
+            changed = r in self.remap
+            t = self.font(28).render(name[:34] + ("  \u2022" if changed else ""), True, col)
+            self.screen.blit(t, t.get_rect(midleft=(row.left + 28, row.centery)))
+            if self.mode == "wait" and on:
+                left = max(0, int(self.wait_until - time.time() + 0.99))
+                t = self.font(26).render(f"Press a button\u2026 {left}", True, (200, 60, 60))
+                self.screen.blit(t, t.get_rect(midright=(row.right - 24, row.centery)))
+            else:
+                self.glyph(self.pad_label(self.remap.get(r, r)), (row.right - 70, row.centery), on)
+        hint = ("Press the button you want for it  \u00b7  Esc to cancel" if self.mode == "wait" else
+                "Choose a game button, then press the button you want for it  \u00b7  \u2022 = changed")
+        t = self.font(22).render(hint, True, (160, 165, 185)); self.screen.blit(t, t.get_rect(midbottom=(W // 2, box.bottom - 24)))
 
     def run(self):
         last_save = time.time(); frames = 0
@@ -492,10 +710,20 @@ class Player:
         finally:
             if self.shot and self.frame: pygame.image.save(self.screen, self.shot); log("INFO", f"Screenshot: {self.shot}")
             self.save_sram()
+            # the save is safe now; if a core (or the sound device) hangs while closing, don't leave the player stuck
+            snd = f", {self.audio.produced / 4 / self.audio.rate:.1f} s of sound" if self.audio else ", no sound"
+            def watchdog():
+                log("WARN", "The core did not close within 8 s; leaving anyway")
+                log("INFO", f"Content ran for {frames} frames ({frames / (self.av.timing.fps or 60):.1f} s of game){snd}")
+                if self.tmpdir: shutil.rmtree(self.tmpdir, ignore_errors=True)
+                os._exit(0)
+            wd = threading.Timer(8, watchdog); wd.daemon = True; wd.start()
+            try: pygame.display.quit()                        # back to Insert Coin's screen straight away
+            except Exception: pass
             if self.audio: self.audio.close()
             self.lib.retro_unload_game(); self.lib.retro_deinit()
+            wd.cancel()
             if self.tmpdir: shutil.rmtree(self.tmpdir, ignore_errors=True)
-            snd = f", {self.audio.produced / 4 / self.audio.rate:.1f} s of sound" if self.audio else ", no sound"
             log("INFO", f"Content ran for {frames} frames ({frames / (self.av.timing.fps or 60):.1f} s of game){snd}")
 
 
@@ -514,7 +742,13 @@ def main():
     pygame.display.init(); pygame.joystick.init(); sdlc.init(); pygame.font.init()
     from pygame._sdl2 import sdl2
     sdl2.init_subsystem(sdl2.INIT_AUDIO)                     # SDL's audio system, without pygame's mixer: we feed the device ourselves
-    p = Player(a[0], a[1], windowed="--windowed" in a, frames=frames, shot=shot)
+    press = []
+    for k, x in enumerate(a):
+        if x == "--press" and k + 1 < len(a):
+            name, rng = a[k + 1].rsplit("@", 1); f0, f1 = (rng.split("-") + [rng])[:2]
+            press.append((name.lower(), int(f0), int(f1)))
+    title = a[a.index("--title") + 1] if "--title" in a else None
+    p = Player(a[0], a[1], windowed="--windowed" in a, frames=frames, shot=shot, press=press, title=title)
     p.run(); pygame.quit()
 
 
