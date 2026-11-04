@@ -8,7 +8,7 @@ plays its sound, feeds it the controllers and keeps its save files.
     engine.py CORE.so ROM [--windowed] [--frames N --shot FILE.png]
 
 ROM may be a plain file, a zip, or RetroArch-style "archive.zip#file.nes".
-In a game: hold Select + Start (or press Esc) to quit back to Insert Coin.
+In a game: Select + Start (or Esc) pauses and opens a small menu: Resume / Quit game.
 
 Supported so far: cores that draw in software (NES, SNES, Mega Drive, Game Boy, arcade, Neo Geo...).
 Cores that need the graphics card (N64, some PS1 modes) are a later step.
@@ -115,7 +115,10 @@ class Player:
         self.keep = []                                        # ctypes objects the core holds pointers to
         self.options, self.opt_buf = {}, {}
         self.pixfmt = 0; self.rotation = 0; self.frame = None; self.surf = None
-        self.running = True; self.audio = None; self.tmpdir = None; self.quit_held = None
+        self.running = True; self.audio = None; self.tmpdir = None
+        self.paused = False; self.menu_sel = 0; self.combo_down = False
+        fp = pygame.font.match_font("ubuntu,notosans,dejavusans", bold=True)
+        self.font = lambda n, _c={}: _c.setdefault(n, pygame.font.Font(fp, n))
         self.av = AVInfo()                                    # some cores report their size while loading
 
         flags = 0 if shot else pygame.SCALED | (0 if windowed else pygame.FULLSCREEN)
@@ -309,6 +312,7 @@ class Player:
             th = H; tw = round(th * aspect)
             if tw > W: tw = W; th = round(W / aspect)
             self.screen.blit(pygame.transform.scale(img, (tw, th)), ((W - tw) // 2, (H - th) // 2))  # sharp pixels
+        if self.paused: self.draw_menu()
         pygame.display.flip()
 
     # -- sound
@@ -321,15 +325,25 @@ class Player:
 
     # -- controllers: port 1 = keyboard + first pad, port 2 = second pad ...
     def open_pads(self):
-        self.pads = []
+        """Open each controller once and keep it (re-opening a pad SDL already has open can leave a stale copy)."""
+        have = {}
+        for c, st in self.pads:
+            try:
+                if c.attached(): have[c.as_joystick().get_instance_id()] = (c, st)
+            except Exception: pass
+        pads = []
         for i in range(sdlc.get_count()):
-            if sdlc.is_controller(i):
-                try:
-                    c = sdlc.Controller(i); j = c.as_joystick()
-                    style = controller_style(c.name, j.get_guid()) if controller_style else "xbox"
-                    self.pads.append((c, style))
-                except Exception: pass
-        log("INFO", "Controllers: " + (", ".join(f"{c.name} ({s})" for c, s in self.pads) or "keyboard only"))
+            if not sdlc.is_controller(i): continue
+            try:
+                j = pygame.joystick.Joystick(i); iid = j.get_instance_id()
+                if iid in have: pads.append(have[iid]); continue
+                c = sdlc.Controller(i)
+                style = controller_style(c.name, j.get_guid()) if controller_style else "xbox"
+                pads.append((c, style))
+            except Exception: pass
+        if [id(c) for c, _ in pads] != [id(c) for c, _ in self.pads]:
+            self.pads = pads
+            log("INFO", "Controllers: " + (", ".join(f"{c.name} ({s})" for c, s in pads) or "keyboard only"))
 
     def pad_bits(self, c, style):
         b = sdlc
@@ -383,16 +397,51 @@ class Player:
         return 0
 
     # -- main loop
+    MENU = ("Resume", "Quit game")
+
     def events(self):
         for e in pygame.event.get():
             if e.type == pygame.QUIT: self.running = False
-            elif e.type == pygame.KEYDOWN and e.key == pygame.K_ESCAPE: self.running = False
             elif e.type in (pygame.CONTROLLERDEVICEADDED, pygame.CONTROLLERDEVICEREMOVED): self.open_pads()
-        # hold Select + Start on any pad for half a second to quit (a quick press still reaches the game)
+            elif e.type == pygame.KEYDOWN:
+                if e.key == pygame.K_ESCAPE: self.set_pause(not self.paused)
+                elif self.paused: self.menu_key({pygame.K_UP: "up", pygame.K_DOWN: "down", pygame.K_RETURN: "ok",
+                                                 pygame.K_KP_ENTER: "ok", pygame.K_BACKSPACE: "back"}.get(e.key))
+            elif e.type == pygame.CONTROLLERBUTTONDOWN and self.paused:
+                self.menu_key({pygame.CONTROLLER_BUTTON_DPAD_UP: "up", pygame.CONTROLLER_BUTTON_DPAD_DOWN: "down",
+                               pygame.CONTROLLER_BUTTON_A: "ok", pygame.CONTROLLER_BUTTON_B: "back"}.get(e.button))
+            elif e.type == pygame.CONTROLLERAXISMOTION and self.paused and e.axis == pygame.CONTROLLER_AXIS_LEFTY and abs(e.value) > 20000:
+                self.menu_key("up" if e.value < 0 else "down")
+        # Select + Start together (on any pad) opens the menu; a second press closes it
         both = any(c.get_button(pygame.CONTROLLER_BUTTON_BACK) and c.get_button(pygame.CONTROLLER_BUTTON_START) for c, _ in self.pads)
-        if not both: self.quit_held = None
-        elif self.quit_held is None: self.quit_held = time.time()
-        elif time.time() - self.quit_held > .5: self.running = False
+        if both and not self.combo_down: self.set_pause(not self.paused)
+        self.combo_down = both
+
+    def set_pause(self, on):
+        self.paused = on; self.menu_sel = 0
+        if not on and self.audio:
+            with self.audio.lock: self.audio.buf.clear()          # no stale sound after a pause
+        log("INFO", "Paused" if on else "Resumed")
+
+    def menu_key(self, k):
+        if k == "up": self.menu_sel = (self.menu_sel - 1) % len(self.MENU)
+        elif k == "down": self.menu_sel = (self.menu_sel + 1) % len(self.MENU)
+        elif k == "back": self.set_pause(False)
+        elif k == "ok":
+            if self.MENU[self.menu_sel] == "Resume": self.set_pause(False)
+            else: log("INFO", "Quit chosen from the game menu"); self.running = False
+
+    def draw_menu(self):
+        dim = pygame.Surface((W, H), pygame.SRCALPHA); dim.fill((0, 0, 0, 160)); self.screen.blit(dim, (0, 0))
+        box = pygame.Rect(0, 0, 560, 150 + 96 * len(self.MENU)); box.center = (W // 2, H // 2)
+        pygame.draw.rect(self.screen, (28, 30, 42), box, border_radius=28)
+        pygame.draw.rect(self.screen, (90, 95, 115), box, 3, border_radius=28)
+        t = self.font(40).render("Paused", True, (255, 255, 255)); self.screen.blit(t, t.get_rect(midtop=(W // 2, box.top + 36)))
+        for k, label in enumerate(self.MENU):
+            r = pygame.Rect(0, 0, 420, 72); r.center = (W // 2, box.top + 150 + k * 96)
+            on = k == self.menu_sel
+            pygame.draw.rect(self.screen, (230, 232, 240) if on else (55, 58, 75), r, border_radius=20)
+            t = self.font(32).render(label, True, (20, 22, 30) if on else (230, 232, 240)); self.screen.blit(t, t.get_rect(center=r.center))
 
     def run(self):
         last_save = time.time(); frames = 0
@@ -400,6 +449,8 @@ class Player:
             while self.running:
                 self.events()
                 ran = 0
+                if self.paused:
+                    self.present(); self.clock.tick(60); continue
                 if self.audio:                               # run the core just fast enough to keep the sound fed
                     while self.running and self.audio.queued() < self.audio.target and ran < 4:
                         self.lib.retro_run(); ran += 1
@@ -433,7 +484,7 @@ def main():
     if len(a) < 2: print(__doc__); sys.exit(2)
     frames = int(a[a.index("--frames") + 1]) if "--frames" in a else None
     shot = a[a.index("--shot") + 1] if "--shot" in a else None
-    pygame.display.init(); pygame.joystick.init(); sdlc.init()
+    pygame.display.init(); pygame.joystick.init(); sdlc.init(); pygame.font.init()
     from pygame._sdl2 import sdl2
     sdl2.init_subsystem(sdl2.INIT_AUDIO)                     # SDL's audio system, without pygame's mixer: we feed the device ourselves
     p = Player(a[0], a[1], windowed="--windowed" in a, frames=frames, shot=shot)

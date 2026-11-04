@@ -1135,7 +1135,7 @@ class App:
         im = self.img.get(g.thumb("Named_Boxarts"), 420, 520)
         if im: self.screen.blit(im, im.get_rect(center=(W / 2, H / 2 - 60)))
         text(self.screen, self.fonts(44, True), g.title, (W / 2, H / 2 + 250), anchor="midtop", maxw=1500)
-        text(self.screen, self.fonts(26), f"Starting…   ({('hold ' if engine and self.style != 'keyboard' else '') + (self.pad_quit.get(self.cur_pad, QUIT_COMBO[self.style]) if self.style != 'keyboard' else 'Esc')} quits the game)", (W / 2, H / 2 + 320), (180, 185, 200), anchor="midtop")
+        text(self.screen, self.fonts(26), f"Starting…   ({self.pad_quit.get(self.cur_pad, QUIT_COMBO[self.style]) if self.style != 'keyboard' else 'Esc'} {'opens the game menu' if engine else 'quits the game'})", (W / 2, H / 2 + 320), (180, 185, 200), anchor="midtop")
         pygame.display.flip()
 
     def draw_empty(self):
