@@ -11,12 +11,13 @@ Controls (Xbox-style pad; keyboard in brackets)
   B                   back            [Backspace / Esc]
   Y                   toggle favorite [F]
   LB / RB             previous / next letter   [PageUp / PageDown]
+  Menu sounds can be switched off in the B menu (saved in ~/.config/insert-coin/settings.json).
   In a game: Select+Start quits back here, click both sticks for RetroArch's menu.
 
 Options: --windowed   run in a window (for testing)
          --shot DIR   render sample screens to PNG files and exit (no display needed)
 """
-__version__ = "0.2.1"
+__version__ = "0.3.0"
 
 import json, os, re, sys, time, random, threading, subprocess, collections
 
@@ -384,6 +385,82 @@ class Fonts:
         return self.f[k]
 
 
+# ---------------------------------------------------------------- sound effects
+class Sounds:
+    """Menu sounds, synthesised at start-up, so there are no audio files. Silent if there is no audio device."""
+    # name -> notes: (start Hz, end Hz, seconds, wave, volume)
+    SPEC = {
+        "move":    [(1250, 1250, .022, "tri", .30)],
+        "system":  [(880, 880, .030, "tri", .32)],
+        "select":  [(660, 660, .045, "sq", .15), (990, 990, .08, "sq", .15)],
+        "back":    [(620, 620, .045, "sq", .13), (415, 415, .08, "sq", .13)],
+        "menu":    [(440, 880, .09, "tri", .30)],
+        "jump":    [(500, 1500, .07, "tri", .26)],
+        "coin":    [(988, 988, .07, "sq", .16), (1319, 1319, .40, "sq", .16)],
+        "fav_on":  [(784, 784, .04, "tri", .32), (988, 988, .04, "tri", .32), (1319, 1319, .13, "tri", .32)],
+        "fav_off": [(988, 988, .05, "tri", .30), (659, 659, .11, "tri", .30)],
+        "error":   [(150, 120, .18, "sq", .13)],
+    }
+
+    def __init__(self, enabled=True, start=True):
+        self.enabled = enabled; self.snd = {}; self.last_tick = 0.0
+        if start: self.open()
+
+    def open(self):
+        try:
+            if not pygame.mixer.get_init(): pygame.mixer.init(44100, -16, 2, 512)
+            rate, fmt, ch = pygame.mixer.get_init()
+            if fmt != -16: return                                   # only 16-bit output is synthesised
+            pygame.mixer.set_reserved(1); self.tick_chan = pygame.mixer.Channel(0)
+            self.snd = {k: pygame.mixer.Sound(buffer=self._synth(v, rate, ch)) for k, v in self.SPEC.items()}
+        except Exception: self.snd = {}
+
+    @staticmethod
+    def _synth(notes, rate, ch):
+        import array
+        out = array.array("h"); phase = 0.0
+        for f0, f1, dur, wave, vol in notes:
+            n = int(rate * dur); attack = rate * .003
+            for i in range(n):
+                t = i / n; phase = (phase + (f0 + (f1 - f0) * t) / rate) % 1.0
+                v = (1.0 if phase < .5 else -1.0) if wave == "sq" else 4 * abs(phase - .5) - 1
+                env = min(1.0, i / attack) * (1 - t) ** 1.5          # quick attack, smooth decay: no clicks
+                out.extend([int(v * env * vol * 32767)] * ch)
+        return out.tobytes()
+
+    def play(self, name):
+        if not self.enabled or name not in self.snd: return
+        if name in ("move", "system"):                              # scrolling: one tick at a time, never a pile-up
+            now = time.time()
+            if now - self.last_tick < .04: return
+            self.last_tick = now; self.tick_chan.play(self.snd[name])
+        else: self.snd[name].play()
+
+    def finish(self, limit=.7):
+        """Let a playing sound end (before the audio device is handed to RetroArch)."""
+        end = time.time() + limit
+        while self.snd and pygame.mixer.get_busy() and time.time() < end: pygame.time.wait(10)
+
+    def close(self):
+        self.snd = {}
+        try: pygame.mixer.quit()
+        except Exception: pass
+
+
+DEFAULT_SETTINGS = {"sound": True}
+
+def load_settings():
+    try:
+        with open(f"{CONFDIR}/settings.json") as f: return {**DEFAULT_SETTINGS, **json.load(f)}
+    except Exception: return dict(DEFAULT_SETTINGS)
+
+def save_settings(s):
+    os.makedirs(CONFDIR, exist_ok=True)
+    tmp = f"{CONFDIR}/settings.json.tmp"
+    with open(tmp, "w") as f: json.dump(s, f, indent=2)
+    os.replace(tmp, f"{CONFDIR}/settings.json")
+
+
 def text(surf, font, s, pos, color=(255, 255, 255), anchor="topleft", shadow=True, maxw=None):
     if maxw:
         while font.size(s)[0] > maxw and len(s) > 4: s = s[:-2].rstrip() + "…" if not s.endswith("…") else s[:-2].rstrip() + "…"
@@ -427,7 +504,10 @@ def shade(c, f):
 class App:
     def __init__(self, windowed=False, shot=None):
         self.windowed, self.shot = windowed, shot
+        pygame.mixer.pre_init(44100, -16, 2, 512)
         pygame.init(); sdlc.init()
+        self.settings = load_settings()
+        self.sfx = Sounds(enabled=self.settings["sound"], start=not shot)
         self.open_display()
         self.fonts = Fonts()
         self.lib = Library()
@@ -495,7 +575,7 @@ class App:
             baseline = {k: j.get_axis(k) for k in range(j.get_numaxes())} if j else {}
         self.setup = {"iid": iid, "name": name or (j.get_name() if j else "Controller"), "guid": guid or (j.get_guid() if j else ""),
                       "step": 0, "map": {}, "base": baseline, "wait": None, "msg": "", "prev": self.screen_mode}
-        self.screen_mode = "setup"; self.hold.clear()
+        self.screen_mode = "setup"; self.hold.clear(); self.sfx.play("menu")
 
     def setup_input(self, e):
         s = self.setup
@@ -519,12 +599,13 @@ class App:
         used = next((a for a, v in s["map"].items() if v == cand), None)
         if used:
             label = next(w for a2, _, w, _ in SETUP_STEPS if a2 == used)
-            s["msg"] = f"That one is already {label} - try another"; return
+            s["msg"] = f"That one is already {label} - try another"; self.sfx.play("error"); return
         s["map"][act] = cand; s["msg"] = ""; self.next_setup_step()
 
     def next_setup_step(self):
         s = self.setup; s["step"] += 1
-        if s["step"] < len(SETUP_STEPS): return
+        if s["step"] < len(SETUP_STEPS): self.sfx.play("move"); return
+        self.sfx.play("select")
         self.saved_maps[s["guid"] or s["name"]] = {"name": s["name"], "map": s["map"]}
         try: self.save_maps()
         except Exception as e: self.say(f"Could not save the controller set-up: {e}")
@@ -534,7 +615,7 @@ class App:
 
     def cancel_setup(self):
         self.screen_mode = self.setup["prev"] if self.setup["prev"] != "quit" else "systems"; self.setup = None
-        self.say("Controller set-up cancelled")
+        self.say("Controller set-up cancelled"); self.sfx.play("back")
 
     def raw_input(self, e):
         """Turn a set-up pad's raw joystick events into menu actions."""
@@ -560,15 +641,20 @@ class App:
 
     def say(self, msg, secs=2.0): self.toast = (msg, time.time() + secs)
 
+    def err(self, msg): self.say(msg); self.sfx.play("error")
+
     # -- actions
     def move(self, d):
+        """Move the selection; returns True if it moved (a list end makes no sound)."""
         if self.screen_mode == "systems":
-            self.si = (self.si + d) % len(self.lib.systems)
+            old = self.si; self.si = (self.si + d) % len(self.lib.systems); return self.si != old
         elif self.screen_mode == "games":
             n = len(self.games())
-            if n: self.gi[self.sys["id"]] = max(0, min(n - 1, self.cur_gi() + d))
+            if n:
+                old = self.cur_gi(); self.gi[self.sys["id"]] = max(0, min(n - 1, old + d)); return self.cur_gi() != old
         elif self.screen_mode == "quit":
-            self.quit_sel = (self.quit_sel + (1 if d > 0 else -1)) % len(self.POWER_MENU)
+            self.quit_sel = (self.quit_sel + (1 if d > 0 else -1)) % len(self.POWER_MENU); return True
+        return False
 
     def jump_letter(self, d):
         if self.screen_mode != "games": return
@@ -583,19 +669,27 @@ class App:
             else:
                 L = gs[start].letter; j = start
                 while j > 0 and gs[j - 1].letter == L: j -= 1
+        if j != i: self.sfx.play("jump")
         self.gi[self.sys["id"]] = j; self.jump = (gs[j].letter, time.time() + 0.9)
 
     def accept(self):
         if self.screen_mode == "systems":
-            self.screen_mode = "games"; self.gpos = float(self.cur_gi())
+            self.screen_mode = "games"; self.gpos = float(self.cur_gi()); self.sfx.play("select")
         elif self.screen_mode == "games":
             g = self.cur_game()
             if g: self.launch(g)
         elif self.screen_mode == "quit":
             choice = self.POWER_MENU[self.quit_sel]
-            if choice == "Resume": self.screen_mode = "systems"
+            if choice == "Resume": self.screen_mode = "systems"; self.sfx.play("back")
             elif choice == "Exit Insert Coin": self.running = False
-            else: self.setup_from_menu()
+            elif choice.startswith("Sound"): self.toggle_sound()
+            else: self.sfx.play("select"); self.setup_from_menu()
+
+    def toggle_sound(self):
+        self.settings["sound"] = self.sfx.enabled = not self.sfx.enabled
+        try: save_settings(self.settings)
+        except Exception as e: self.say(f"Could not save the setting: {e}")
+        self.sfx.play("select")                                     # only heard when it was switched on
 
     def setup_from_menu(self):
         """Set up (or redo) the unrecognised controller used last, or say why it isn't needed."""
@@ -608,16 +702,17 @@ class App:
         self.start_setup(iid)
 
     def back(self):
-        if self.screen_mode == "games": self.screen_mode = "systems"
-        elif self.screen_mode == "systems": self.screen_mode = "quit"; self.quit_sel = 0
-        else: self.screen_mode = "systems"
+        if self.screen_mode == "games": self.screen_mode = "systems"; self.sfx.play("back")
+        elif self.screen_mode == "systems": self.screen_mode = "quit"; self.quit_sel = 0; self.sfx.play("menu")
+        else: self.screen_mode = "systems"; self.sfx.play("back")
 
     def favorite(self):
         g = self.cur_game() if self.screen_mode == "games" else None
         if not g: return
         if subprocess.run(["pgrep", "-x", "retroarch"], capture_output=True).returncode == 0:
-            self.say("Close RetroArch first to change favorites"); return
+            self.err("Close RetroArch first to change favorites"); return
         added = self.lib.toggle_favorite(g)
+        self.sfx.play("fav_on" if added else "fav_off")
         self.say(("Added to Favorites: " if added else "Removed from Favorites: ") + g.title)
         sid = self.sys["id"]; self.lib.refresh_specials()
         self.si = next((i for i, s in enumerate(self.lib.systems) if s["id"] == sid), 0)
@@ -625,10 +720,11 @@ class App:
 
     def launch(self, g):
         if not g.core:
-            self.say("No core is set for this game yet - assign one in RetroArch"); return
+            self.err("No core is set for this game yet - assign one in RetroArch"); return
         if not os.path.exists(g.path.split("#")[0]):
-            self.say("ROM file not found"); return
-        self.draw(); self.splash(g)
+            self.err("ROM file not found"); return
+        self.sfx.play("coin"); self.draw(); self.splash(g)
+        self.sfx.finish(); self.sfx.close()                          # hand the audio device to RetroArch
         os.makedirs(APPDIR, exist_ok=True)
         with open(f"{APPDIR}/launch.cfg", "w") as f: f.write(LAUNCH_CFG)
         pygame.display.quit()
@@ -637,14 +733,14 @@ class App:
             subprocess.run(["retroarch", "-L", g.core, g.path, f"--appendconfig={APPDIR}/launch.cfg"],
                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         except Exception as e:
-            self.say(f"Could not start RetroArch: {e}")
-        pygame.display.init(); self.open_display(); self.open_pads()
+            self.err(f"Could not start RetroArch: {e}")
+        pygame.display.init(); self.open_display(); self.open_pads(); self.sfx.open()
         self.img.cache.clear(); self.prev_bg = None
         pygame.event.clear(); self.hold.clear()
         sid, gid = self.sys["id"], self.cur_gi()
         self.lib.refresh_specials()
         self.si = next((i for i, s in enumerate(self.lib.systems) if s["id"] == sid), 0); self.gi[sid] = gid
-        if time.time() - t0 < 3: self.say("The game closed straight away - it may need a different core")
+        if time.time() - t0 < 3: self.err("The game closed straight away - it may need a different core")
 
     # -- input handling with key repeat
     REPEAT_FIRST, REPEAT = 0.32, 0.075
@@ -656,7 +752,7 @@ class App:
         if act in ("left", "right", "up", "down"):
             d = -1 if act in ("left", "up") else 1
             if self.screen_mode == "games" and act in ("up", "down"): d *= 10
-            self.move(d)
+            if self.move(d): self.sfx.play("system" if self.screen_mode == "systems" else "move")
         elif act == "a": self.accept()
         elif act == "b": self.back()
         elif act == "y": self.favorite()
@@ -913,12 +1009,14 @@ class App:
             text(self.screen, self.fonts(150, True), self.jump[0], (cx, cy), anchor="center")
         self.draw_hints([("a", "Play"), ("b", "Back"), ("y", "Favorite"), ("lbrb", "Jump A–Z")])
 
-    POWER_MENU = ("Resume", "Set up controller", "Exit Insert Coin")
+    @property
+    def POWER_MENU(self):
+        return ("Resume", f"Sound: {'On' if self.sfx.enabled else 'Off'}", "Set up controller", "Exit Insert Coin")
 
     def draw_quit(self):
         self.draw_systems(hints=False)
         dim = pygame.Surface((W, H), pygame.SRCALPHA); dim.fill((0, 0, 0, 170)); self.screen.blit(dim, (0, 0))
-        box = pygame.Rect(0, 0, 640, 470); box.center = (W / 2, H / 2)
+        box = pygame.Rect(0, 0, 640, 200 + 96 * len(self.POWER_MENU)); box.center = (W / 2, H / 2)
         rrect(self.screen, (28, 30, 42), box, 28); rrect(self.screen, (90, 95, 115), box, 28, 3)
         text(self.screen, self.fonts(44, True), "Insert Coin", (W / 2, box.top + 48), anchor="midtop")
         for k, lbl in enumerate(self.POWER_MENU):
