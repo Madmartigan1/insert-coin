@@ -101,24 +101,25 @@ def controller_style(name, guid=""):
 # action -> how its button looks, per style. kinds: letter (round button), shape (PlayStation symbol), pill, key
 GLYPHS = {
     "xbox": {"a": ("letter", "A", (90, 190, 90)), "b": ("letter", "B", (220, 80, 70)),
-             "y": ("letter", "Y", (230, 190, 50)), "lbrb": ("pill", "LB RB", (120, 130, 150))},
+             "y": ("letter", "Y", (230, 190, 50)), "x": ("letter", "X", (70, 130, 230)), "lbrb": ("pill", "LB RB", (120, 130, 150))},
     "playstation": {"a": ("shape", "cross", (120, 160, 245)), "b": ("shape", "circle", (235, 90, 95)),
-                    "y": ("shape", "triangle", (70, 200, 160)), "lbrb": ("pill", "L1 R1", (120, 130, 150))},
+                    "y": ("shape", "triangle", (70, 200, 160)), "x": ("shape", "square", (230, 130, 200)), "lbrb": ("pill", "L1 R1", (120, 130, 150))},
     "nintendo": {"a": ("letter", "A", (110, 116, 132)), "b": ("letter", "B", (110, 116, 132)),
-                 "y": ("letter", "Y", (110, 116, 132)), "lbrb": ("pill", "L R", (120, 130, 150))},
+                 "y": ("letter", "Y", (110, 116, 132)), "x": ("letter", "X", (110, 116, 132)), "lbrb": ("pill", "L R", (120, 130, 150))},
     "keyboard": {"a": ("key", "Enter", None), "b": ("key", "Esc", None),
-                 "y": ("key", "F", None), "lbrb": ("key", "PgUp PgDn", None)},
+                 "y": ("key", "F", None), "x": ("key", "V", None), "lbrb": ("key", "PgUp PgDn", None)},
 }
 GLYPHS["snes"] = dict(GLYPHS["nintendo"])                        # replicas: same printed letters as Nintendo
 GLYPHS["generic"] = {"a": ("letter", "A", (110, 116, 132)), "b": ("letter", "B", (110, 116, 132)),   # set-up pads
-                     "y": ("letter", "Y", (110, 116, 132)), "lbrb": ("pill", "LB RB", (120, 130, 150))}
+                     "y": ("letter", "Y", (110, 116, 132)), "x": ("letter", "X", (110, 116, 132)), "lbrb": ("pill", "LB RB", (120, 130, 150))}
 QUIT_COMBO = {"xbox": "Back + Start", "playstation": "Share + Options", "nintendo": "Minus + Plus", "keyboard": "Esc",
               "generic": "Select + Start", "snes": "Select + Start"}
 
 # controller set-up for pads SDL doesn't recognise: (action, button shown, what it does, optional)
 SETUP_STEPS = [("up", "up", "Up", False), ("down", "down", "Down", False), ("left", "left", "Left", False),
                ("right", "right", "Right", False), ("a", "A", "Select / play", False), ("b", "B", "Back", False),
-               ("y", "Y", "Favorite", True), ("lb", "LB", "Previous letter", True), ("rb", "RB", "Next letter", True)]
+               ("y", "Y", "Favorite", True), ("x", "X", "Other versions", True),
+               ("lb", "LB", "Previous letter", True), ("rb", "RB", "Next letter", True)]
 CONFDIR = os.environ.get("INSERT_COIN_CONFIG") or os.path.expanduser("~/.config/insert-coin")
 
 
@@ -173,7 +174,7 @@ def thumb_system(db_name):
 
 # ---------------------------------------------------------------- data
 class Game:
-    __slots__ = ("label", "path", "core", "db", "title", "letter", "key", "system")
+    __slots__ = ("label", "path", "core", "db", "title", "letter", "key", "system", "versions")
 
     def __init__(self, it, playlist_db, default_core):
         self.label = it.get("label") or os.path.splitext(os.path.basename(split_archive(it["path"])[0]))[0]
@@ -185,6 +186,7 @@ class Game:
         self.letter = letter_of(self.label)
         self.key = sort_key(self.label)
         self.system = (self.db or "")[:-4] if (self.db or "").endswith(".lpl") else self.db
+        self.versions = None                                        # other regions / translations / dumps of this game
 
     def thumb(self, kind):
         return f"{RA}/thumbnails/{thumb_system(self.db)}/{kind}/{sanitize(self.label)}.png"
@@ -215,6 +217,42 @@ def dedupe(games, saves):
     return [g for _, g in best.values()]
 
 
+ROMAN = {"ii": "2", "iii": "3", "iv": "4", "v": "5", "vi": "6"}
+
+def title_key(title):
+    """'The Pixel Knights' / 'Pixel Knights, The', 'Star Pilot II' / 'Star Pilot 2', 'Turbo-Tanks' / 'Turbo Tanks'."""
+    t = re.sub(r"^the\s+", "", title.lower())
+    words = re.findall(r"[a-z0-9]+", t)
+    return " ".join(ROMAN.get(w, w) for w in words)
+
+REGION_RANK = [(r"\b(usa|us|u|ue|ju|jp-us|world)\b", 0), (r"\b(europe|eu|e)\b", 1), (r"\b(japan|j|jp)\b", 2)]
+
+def version_score(g, saves):
+    """Lower is better: the copy you've played, then the USA / World release, then Europe, then Japan;
+    translations, hacks, alternates, betas and protos after the clean dumps."""
+    tagtext = " ".join(tags(g.label)).lower()
+    region = next((r for pat, r in REGION_RANK if re.search(pat, tagtext)), 3)
+    odd = bool(re.search(r"\[(tr|t[+-]|h|b|p|a|o)|pt-br|\balt\b|beta|proto|hack|sample|demo|\(t\)", g.label.lower()))
+    return (rom_stem(g.path).lower() not in saves, odd, region, g.path.count("/"), len(g.label))
+
+def group_versions(games, saves):
+    """One entry per game title; the best version leads and carries the rest in .versions (shown with X)."""
+    groups = collections.OrderedDict()
+    for g in games: groups.setdefault((g.system, title_key(g.title)), []).append(g)
+    # a name without its subtitle ("Star Pilot 2") joins the one game it starts ("Star Pilot II - Return of the Comet")
+    by_short = collections.defaultdict(list)
+    for (sysid, key), vs in groups.items():
+        if " - " in vs[0].title: by_short[(sysid, title_key(vs[0].title.split(" - ")[0]))].append((sysid, key))
+    for k in list(groups):
+        if k in by_short and len(by_short[k]) == 1 and by_short[k][0] != k and " - " not in groups[k][0].title:
+            groups[by_short[k][0]] += groups.pop(k)
+    out = []
+    for vs in groups.values():
+        vs.sort(key=lambda g: version_score(g, saves))
+        lead = vs[0]; lead.versions = vs if len(vs) > 1 else None; out.append(lead)
+    return out
+
+
 class Library:
     def __init__(self):
         self.defaults = {}
@@ -243,6 +281,7 @@ class Library:
             games = [Game(it, name + ".lpl", self.defaults[name + ".lpl"]) for it in d.get("items", []) if it.get("path")]
             if not games: continue                                  # tidy: hide empty systems
             n = len(games); games = dedupe(games, saves); self.hidden += n - len(games)
+            games = group_versions(games, saves)
             games.sort(key=lambda g: g.key)
             fn, maker, col = FRIENDLY.get(name, (name.split(" - ")[-1], name.split(" - ")[0], (90, 100, 130)))
             self.systems.append({"id": name, "name": fn, "maker": maker, "color": col, "games": games, "special": None})
@@ -611,7 +650,7 @@ class App:
         self.spos = float(self.si); self.gpos = 0.0
         self.toast = None; self.jump = None
         self.prev_bg = None; self.bg_change = 0
-        self.hold = {}; self.quit_sel = 1
+        self.hold = {}; self.quit_sel = 1; self.vlist = []; self.vsel = 0
         self.clock = pygame.time.Clock()
 
     # -- display / input
@@ -739,7 +778,14 @@ class App:
                 old = self.cur_gi(); self.gi[self.sys["id"]] = max(0, min(n - 1, old + d)); return self.cur_gi() != old
         elif self.screen_mode == "quit":
             self.quit_sel = (self.quit_sel + (1 if d > 0 else -1)) % len(self.POWER_MENU); return True
+        elif self.screen_mode == "versions":
+            n = len(self.vlist); old = self.vsel; self.vsel = max(0, min(n - 1, self.vsel + (1 if d > 0 else -1))); return self.vsel != old
         return False
+
+    def open_versions(self):
+        g = self.cur_game() if self.screen_mode == "games" else None
+        if not g or not g.versions: return
+        self.vlist = g.versions; self.vsel = 0; self.screen_mode = "versions"; self.sfx.play("menu")
 
     def jump_letter(self, d):
         if self.screen_mode != "games": return
@@ -763,6 +809,8 @@ class App:
         elif self.screen_mode == "games":
             g = self.cur_game()
             if g: self.launch(g)
+        elif self.screen_mode == "versions":
+            self.screen_mode = "games"; self.launch(self.vlist[self.vsel])
         elif self.screen_mode == "quit":
             choice = self.POWER_MENU[self.quit_sel]
             if choice == "Resume": self.screen_mode = "systems"; self.sfx.play("back")
@@ -797,6 +845,7 @@ class App:
 
     def back(self):
         if self.screen_mode == "games": self.screen_mode = "systems"; self.sfx.play("back")
+        elif self.screen_mode == "versions": self.screen_mode = "games"; self.sfx.play("back")
         elif self.screen_mode == "systems": self.screen_mode = "quit"; self.quit_sel = 0; self.sfx.play("menu")
         else: self.screen_mode = "systems"; self.sfx.play("back")
 
@@ -869,10 +918,12 @@ class App:
         if act in ("left", "right", "up", "down"):
             d = -1 if act in ("left", "up") else 1
             if self.screen_mode == "games" and act in ("up", "down"): d *= 10
+            if self.screen_mode == "versions" and act in ("left", "right"): return
             if self.move(d): self.sfx.play("system" if self.screen_mode == "systems" else "move")
         elif act == "a": self.accept()
         elif act == "b": self.back()
         elif act == "y": self.favorite()
+        elif act == "x": self.open_versions()
         elif act == "lb": self.jump_letter(-1)
         elif act == "rb": self.jump_letter(1)
 
@@ -885,10 +936,11 @@ class App:
     def handle(self, e):
         K = {pygame.K_LEFT: "left", pygame.K_RIGHT: "right", pygame.K_UP: "up", pygame.K_DOWN: "down",
              pygame.K_RETURN: "a", pygame.K_KP_ENTER: "a", pygame.K_BACKSPACE: "b", pygame.K_ESCAPE: "b",
-             pygame.K_f: "y", pygame.K_PAGEUP: "lb", pygame.K_PAGEDOWN: "rb"}
+             pygame.K_f: "y", pygame.K_v: "x", pygame.K_PAGEUP: "lb", pygame.K_PAGEDOWN: "rb"}
         B = {pygame.CONTROLLER_BUTTON_DPAD_LEFT: "left", pygame.CONTROLLER_BUTTON_DPAD_RIGHT: "right",
              pygame.CONTROLLER_BUTTON_DPAD_UP: "up", pygame.CONTROLLER_BUTTON_DPAD_DOWN: "down",
              pygame.CONTROLLER_BUTTON_A: "a", pygame.CONTROLLER_BUTTON_B: "b", pygame.CONTROLLER_BUTTON_Y: "y",
+             pygame.CONTROLLER_BUTTON_X: "x",
              pygame.CONTROLLER_BUTTON_LEFTSHOULDER: "lb", pygame.CONTROLLER_BUTTON_RIGHTSHOULDER: "rb",
              pygame.CONTROLLER_BUTTON_START: "a", pygame.CONTROLLER_BUTTON_BACK: "b"}
         JOY = (pygame.JOYBUTTONDOWN, pygame.JOYBUTTONUP, pygame.JOYHATMOTION, pygame.JOYAXISMOTION)
@@ -923,8 +975,9 @@ class App:
             if self.pad_style.get(getattr(e, "instance_id", None)) == "snes":
                 # SDL maps replicas by position: its "A" is the bottom button, printed B. Follow the printed
                 # labels like a real Nintendo pad: right (printed A) plays, bottom (B) goes back, left (Y) favorites.
-                Bs = dict(B); Bs.pop(pygame.CONTROLLER_BUTTON_Y)
-                Bs.update({pygame.CONTROLLER_BUTTON_A: "b", pygame.CONTROLLER_BUTTON_B: "a", pygame.CONTROLLER_BUTTON_X: "y"})
+                Bs = dict(B)
+                Bs.update({pygame.CONTROLLER_BUTTON_A: "b", pygame.CONTROLLER_BUTTON_B: "a", pygame.CONTROLLER_BUTTON_X: "y",
+                           pygame.CONTROLLER_BUTTON_Y: "x"})
             else: Bs = B
             if e.button in Bs: self.set_hold(Bs[e.button], e.type == pygame.CONTROLLERBUTTONDOWN)
         elif e.type == pygame.CONTROLLERAXISMOTION and e.axis in (pygame.CONTROLLER_AXIS_LEFTX, pygame.CONTROLLER_AXIS_LEFTY):
@@ -998,6 +1051,8 @@ class App:
                     pygame.draw.circle(s, color, (cx, cy), 9, 4)
                 elif label == "triangle":
                     pygame.draw.polygon(s, color, [(cx, cy - 10), (cx + 10, cy + 8), (cx - 10, cy + 8)], 4)
+                elif label == "square":
+                    pygame.draw.rect(s, color, (cx - 8, cy - 8, 16, 16), 4)
             return x + 52
         f = self.fonts(22, True)                                   # pills (shoulder buttons) and keyboard keys
         for part in label.split():
@@ -1062,7 +1117,7 @@ class App:
         text(self.screen, self.fonts(30), s["maker"] if s["special"] else f"{len(s['games']):,} games", (W / 2, 850), (210, 215, 228), anchor="midtop")
         if hints: self.draw_hints([("a", "Open"), ("b", "Power")])
 
-    def draw_games(self):
+    def draw_games(self, hints=True):
         s = self.sys; gs = self.games(); i = self.cur_gi(); g = gs[i] if gs else None
         self.draw_background(s["color"], g)
         self.draw_header(s["name"], f"{len(gs):,} games  ·  {i + 1:,} / {len(gs):,}")
@@ -1118,13 +1173,37 @@ class App:
             if info: text(self.screen, self.fonts(28), "  ·  ".join(info), (cx, 846), (205, 210, 225), anchor="midtop", maxw=1250)
             if not g.core:
                 text(self.screen, self.fonts(24), "No core assigned", (cx, 892), (240, 150, 120), anchor="midtop")
+            elif g.versions:
+                text(self.screen, self.fonts(26, True), f"{len(g.versions)} versions", (cx, 892), (150, 200, 255), anchor="midtop")
         else:
             text(self.screen, self.fonts(40), "No games here", (W / 2, H / 2), anchor="center")
         if self.jump and time.time() < self.jump[1]:
             box = pygame.Surface((220, 220), pygame.SRCALPHA); rrect(box, (0, 0, 0, 190), box.get_rect(), 30)
             self.screen.blit(box, (cx - 110, cy - 110))
             text(self.screen, self.fonts(150, True), self.jump[0], (cx, cy), anchor="center")
-        self.draw_hints([("a", "Play"), ("b", "Back"), ("y", "Favorite"), ("lbrb", "Jump A–Z")])
+        if not hints: return
+        hs = [("a", "Play"), ("b", "Back"), ("y", "Favorite")]
+        if g and g.versions: hs.append(("x", "Versions"))
+        self.draw_hints(hs + [("lbrb", "Jump A–Z")])
+
+    def draw_versions(self):
+        self.draw_games(hints=False)
+        dim = pygame.Surface((W, H), pygame.SRCALPHA); dim.fill((0, 0, 0, 175)); self.screen.blit(dim, (0, 0))
+        vs = self.vlist; show = 7; top = max(0, min(self.vsel - show // 2, len(vs) - show))
+        box = pygame.Rect(0, 0, 1180, 190 + 84 * min(show, len(vs))); box.center = (W / 2, H / 2 - 20)
+        rrect(self.screen, (28, 30, 42), box, 28); rrect(self.screen, (90, 95, 115), box, 28, 3)
+        text(self.screen, self.fonts(40, True), vs[0].title, (W / 2, box.top + 34), anchor="midtop", maxw=1080)
+        text(self.screen, self.fonts(26), f"{len(vs)} versions", (W / 2, box.top + 88), (170, 175, 190), anchor="midtop")
+        for row, k in enumerate(range(top, min(len(vs), top + show))):
+            r = pygame.Rect(0, 0, 1080, 70); r.midtop = (W / 2, box.top + 140 + row * 84)
+            on = k == self.vsel
+            rrect(self.screen, (230, 232, 240) if on else (55, 58, 75), r, 18)
+            folder = os.path.basename(os.path.dirname(split_archive(vs[k].path)[0]))
+            text(self.screen, self.fonts(28, True), vs[k].label, (r.left + 28, r.centery), (20, 22, 30) if on else (230, 232, 240),
+                 anchor="midleft", shadow=False, maxw=760)
+            text(self.screen, self.fonts(22), folder, (r.right - 24, r.centery), (90, 95, 110) if on else (150, 155, 170),
+                 anchor="midright", shadow=False, maxw=260)
+        self.draw_hints([("a", "Play"), ("b", "Back")])
 
     @property
     def POWER_MENU(self):
@@ -1197,7 +1276,8 @@ class App:
             return self.draw_setup()
         if not self.lib.systems:
             return self.draw_empty()
-        {"systems": self.draw_systems, "games": self.draw_games, "quit": self.draw_quit}[self.screen_mode]()
+        {"systems": self.draw_systems, "games": self.draw_games, "quit": self.draw_quit,
+         "versions": self.draw_versions}[self.screen_mode]()
         if self.toast and time.time() < self.toast[1]:
             f = self.fonts(30); w = f.size(self.toast[0])[0] + 60
             r = pygame.Rect(0, 0, w, 64); r.midtop = (W / 2, 150)
