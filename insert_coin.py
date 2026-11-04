@@ -133,6 +133,13 @@ def quit_combo(style, name="", guid=""):
     return QUIT_COMBO[style]
 
 
+def split_archive(path):
+    """RetroArch's 'archive.zip#file.nes' -> ('archive.zip', 'file.nes'). Only a '#' straight after .zip / .7z
+    counts: folder names may contain '#' themselves (e.g. '# Translations #')."""
+    m = re.search(r"(?i)\.(zip|7z)#", path)
+    return (path[:m.end() - 1], path[m.end():]) if m else (path, "")
+
+
 def sanitize(s):
     return re.sub(r'[&*/:`<>?\\|"]', "_", s)
 
@@ -169,7 +176,7 @@ class Game:
     __slots__ = ("label", "path", "core", "db", "title", "letter", "key", "system")
 
     def __init__(self, it, playlist_db, default_core):
-        self.label = it.get("label") or os.path.splitext(os.path.basename(it["path"].split("#")[0]))[0]
+        self.label = it.get("label") or os.path.splitext(os.path.basename(split_archive(it["path"])[0]))[0]
         self.path = it["path"]
         c = it.get("core_path") or ""
         self.core = c if c not in ("", "DETECT") and os.path.exists(c) else default_core
@@ -183,9 +190,35 @@ class Game:
         return f"{RA}/thumbnails/{thumb_system(self.db)}/{kind}/{sanitize(self.label)}.png"
 
 
+def rom_stem(path):
+    """The game's own file name without extension: 'a.zip#Game (USA).nes' -> 'Game (USA)'. Saves are named after it."""
+    return os.path.splitext(os.path.basename(split_archive(path)[1] or path))[0]
+
+
+def save_names():
+    """Names of every battery save (RetroArch's and Insert Coin's), to prefer the copy of a game you've played."""
+    names = set()
+    for d in (f"{RA}/saves", f"{APPDIR}/saves"):
+        for root, _, files in os.walk(d):
+            names.update(os.path.splitext(f)[0].lower() for f in files)
+    return names
+
+
+def dedupe(games, saves):
+    """One entry per game. RetroArch names every copy of the same game identically, so copies kept in several
+    folders (a main folder, a "top 100", ...) show once. The copy shown is the one with a save, else the one
+    in the shallowest folder (usually the main collection), so its save keeps working."""
+    best = {}
+    for g in games:
+        score = (rom_stem(g.path).lower() not in saves, g.path.count("/"), len(g.path))
+        if g.label not in best or score < best[g.label][0]: best[g.label] = (score, g)
+    return [g for _, g in best.values()]
+
+
 class Library:
     def __init__(self):
         self.defaults = {}
+        self.hidden = 0                                             # duplicate copies not shown
         self.systems = []          # list of dicts: id, name, maker, color, games, special
         self.load()
 
@@ -205,9 +238,11 @@ class Library:
         for name, d in pls.items():
             dc = d.get("default_core_path") or ""
             self.defaults[name + ".lpl"] = dc if dc and os.path.exists(dc) else None
+        saves = save_names(); self.hidden = 0
         for name, d in sorted(pls.items(), key=lambda kv: (ORDER.get(kv[0], 99), kv[0])):
             games = [Game(it, name + ".lpl", self.defaults[name + ".lpl"]) for it in d.get("items", []) if it.get("path")]
             if not games: continue                                  # tidy: hide empty systems
+            n = len(games); games = dedupe(games, saves); self.hidden += n - len(games)
             games.sort(key=lambda g: g.key)
             fn, maker, col = FRIENDLY.get(name, (name.split(" - ")[-1], name.split(" - ")[0], (90, 100, 130)))
             self.systems.append({"id": name, "name": fn, "maker": maker, "color": col, "games": games, "special": None})
@@ -217,7 +252,7 @@ class Library:
     def _special_games(self, items):
         out = []
         for it in items:
-            if not it.get("path") or not os.path.exists(it["path"].split("#")[0]): continue
+            if not it.get("path") or not os.path.exists(split_archive(it["path"])[0]): continue
             db = it.get("db_name") or ""
             out.append(Game(it, db, self.defaults.get(db)))
         return out
@@ -226,20 +261,26 @@ class Library:
         self.systems = [s for s in self.systems if not s["special"]]
         hist = self._read(f"{RA}/content_history.lpl") or {"items": []}
         self.favorites_raw = self._read(f"{RA}/content_favorites.lpl") or {"version": "1.5", "items": []}
-        fav = sorted(self._special_games(self.favorites_raw.get("items", [])), key=lambda g: g.key)
+        fav = sorted(dedupe(self._special_games(self.favorites_raw.get("items", [])), set()), key=lambda g: g.key)
         seen, rec = set(), []
         for g in self._special_games(hist.get("items", [])):
-            if g.path not in seen: seen.add(g.path); rec.append(g)
+            if (g.db, g.label) not in seen: seen.add((g.db, g.label)); rec.append(g)
         specials = []
         if fav: specials.append({"id": "favorites", "name": "Favorites", "maker": "Your picks", "color": (230, 180, 40), "games": fav, "special": "fav"})
         if rec: specials.append({"id": "recent", "name": "Recently Played", "maker": "Pick up where you left off", "color": (60, 170, 200), "games": rec[:60], "special": "recent"})
         self.systems = specials + self.systems
         self.fav_paths = {it.get("path") for it in self.favorites_raw.get("items", [])}
+        self.fav_keys = {(it.get("db_name") or "", it.get("label")) for it in self.favorites_raw.get("items", [])}
+
+    def is_fav(self, g):
+        """A favorite, whichever copy of the game was starred."""
+        return g.path in self.fav_paths or ((g.db or ""), g.label) in self.fav_keys
 
     def toggle_favorite(self, g):
         items = self.favorites_raw.setdefault("items", [])
-        if g.path in self.fav_paths:
-            items[:] = [it for it in items if it.get("path") != g.path]; added = False
+        same = lambda it: it.get("path") == g.path or ((it.get("db_name") or ""), it.get("label")) == ((g.db or ""), g.label)
+        if self.is_fav(g):
+            items[:] = [it for it in items if not same(it)]; added = False
         else:
             items.append({"path": g.path, "label": g.label, "core_path": g.core or "DETECT",
                           "core_name": "DETECT" if not g.core else os.path.basename(g.core).replace("_libretro.so", ""),
@@ -249,6 +290,7 @@ class Library:
         with open(tmp, "w", encoding="utf-8") as f: json.dump(self.favorites_raw, f, indent=2)
         os.replace(tmp, p)
         self.fav_paths = {it.get("path") for it in items}
+        self.fav_keys = {(it.get("db_name") or "", it.get("label")) for it in items}
         return added
 
     def add_history(self, g):
@@ -329,7 +371,7 @@ class Meta:
         db = g.system or ""
         with self.lock: m = self.data.get(db)
         if not m: return None
-        rom = os.path.splitext(os.path.basename(g.path.split("#")[0]))[0]
+        rom = os.path.splitext(os.path.basename(split_archive(g.path)[0]))[0]
         return m.get("n:" + g.label) or m.get("r:" + rom)
 
 
@@ -558,8 +600,8 @@ class App:
         if self.pad_style: self.cur_pad, self.style = next(iter(self.pad_style.items()))
         log.info("Insert Coin %s started (Python %s, pygame-ce %s, SDL %s, %s)", __version__, platform.python_version(),
                  pygame.version.ver, ".".join(map(str, pygame.get_sdl_version())), platform.platform())
-        log.info("%d systems, %d games; sound %s (%s)", sum(not s["special"] for s in self.lib.systems),
-                 sum(len(s["games"]) for s in self.lib.systems if not s["special"]),
+        log.info("%d systems, %d games (%d duplicate copies hidden); sound %s (%s)", sum(not s["special"] for s in self.lib.systems),
+                 sum(len(s["games"]) for s in self.lib.systems if not s["special"]), self.lib.hidden,
                  "on" if self.sfx.enabled else "off", "audio ready" if self.sfx.snd else "no audio device")
         for c in self.pads.values(): log.info("Controller: %s (%s)", c.name, self.pad_style.get(c.as_joystick().get_instance_id()))
         for j in self.raw.values(): log.info("Controller without SDL mapping: %s (%s)", j.get_name(), "set up" if j.get_instance_id() in self.raw_map else "not set up")
@@ -773,7 +815,7 @@ class App:
     def launch(self, g):
         if not g.core:
             self.err("No core is set for this game yet - assign one in RetroArch"); return
-        if not os.path.exists(g.path.split("#")[0]):
+        if not os.path.exists(split_archive(g.path)[0]):
             self.err("ROM file not found"); return
         engine = self.settings.get("engine") and os.path.basename(g.core) in ENGINE_CORES
         who = "Built-in player" if engine else "RetroArch"
@@ -1046,7 +1088,7 @@ class App:
             self.screen.blit(im, r)
             if ad <= 0.5:
                 rrect(self.screen, (255, 255, 255), r.inflate(12, 12), 14, 5)
-                if gs[j].path in self.lib.fav_paths:
+                if self.lib.is_fav(gs[j]):
                     star(self.screen, (r.right - 30, r.top + 32), 26)
         self.screen.set_clip(None)
         # title-screen side panel

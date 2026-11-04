@@ -13,7 +13,7 @@ In a game: Select + Start (or Esc) pauses and opens a small menu: Resume / Quit 
 Supported so far: cores that draw in software (NES, SNES, Mega Drive, Game Boy, arcade, Neo Geo...).
 Cores that need the graphics card (N64, some PS1 modes) are a later step.
 """
-import ctypes as C, os, sys, time, json, shutil, struct, tempfile, threading, zipfile
+import ctypes as C, os, re, sys, time, json, shutil, struct, tempfile, threading, zipfile
 
 os.environ.setdefault("PYGAME_HIDE_SUPPORT_PROMPT", "1")
 import pygame
@@ -27,6 +27,12 @@ SAVES = f"{APPDIR}/saves"
 # BIOS files: Insert Coin's own folder once it has one, else the one RetroArch uses (Neo Geo BIOS lives there)
 SYSTEM = f"{APPDIR}/system" if os.path.isdir(f"{APPDIR}/system") else f"{RA}/system"
 W, H = 1920, 1080
+
+def split_archive(path):
+    """RetroArch's 'archive.zip#file.nes' -> ('archive.zip', 'file.nes'). Only a '#' straight after .zip / .7z
+    counts: folder names may contain '#' themselves (e.g. '# Translations #')."""
+    m = re.search(r"(?i)\.(zip|7z)#", path)
+    return (path[:m.end() - 1], path[m.end():]) if m else (path, "")
 
 def log(level, msg): print(f"[{level}] {msg}", flush=True)
 
@@ -245,7 +251,7 @@ class Player:
     # -- loading the game (zips handled like RetroArch: extract unless the core reads zips itself)
     def load_game(self):
         exts = [e.lower() for e in (self.info.valid_extensions or b"").decode().split("|") if e]
-        path, _, inner = self.rom.partition("#")
+        path, inner = split_archive(self.rom)
         if not os.path.exists(path): raise SystemExit(f"[ERROR] ROM not found: {path}")
         data = None
         if not inner and path.lower().endswith(".zip") and "zip" not in exts:
