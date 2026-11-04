@@ -4,6 +4,16 @@ All notable changes to Insert Coin. Versions follow [semantic versioning](https:
 before 1.0, minor versions add features and patch versions fix bugs.
 Each version is also a [GitHub Release](https://github.com/Madmartigan1/insert-coin/releases).
 
+## [0.3.1] — 2026-11-04 · "Credit counter"
+
+### Changed
+- **A coin-up sound of its own.** Starting a game now plays six quick rising ticks, like the
+  credit counter on an arcade cabinet going up, followed by a bell — in place of the two-note
+  coin, which sounded too much like a famous console's. Just as arcade cabinets each had their
+  own coin sound, this one is Insert Coin's.
+- The sound synthesiser can now play rests and several notes at once (the bell is two waveforms
+  layered together).
+
 ## [0.3.0] — 2026-11-04 · "Sound check"
 
 Insert Coin now sounds like a console, and keeps a record of what happened when something
@@ -105,6 +115,7 @@ A controller-driven, console-style game menu for RetroArch on Linux.
 - **`sync_thumbnails.py`** fills in missing box art, snapshots and title screens from
   thumbnails.libretro.com.
 
+[0.3.1]: https://github.com/Madmartigan1/insert-coin/releases/tag/v0.3.1
 [0.3.0]: https://github.com/Madmartigan1/insert-coin/releases/tag/v0.3.0
 [0.2.1]: https://github.com/Madmartigan1/insert-coin/releases/tag/v0.2.1
 [0.2.0]: https://github.com/Madmartigan1/insert-coin/releases/tag/v0.2.0
