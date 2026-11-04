@@ -4,6 +4,21 @@ All notable changes to Insert Coin. Versions follow [semantic versioning](https:
 before 1.0, minor versions add features and patch versions fix bugs.
 Each version is also a [GitHub Release](https://github.com/Madmartigan1/insert-coin/releases).
 
+## [Unreleased]
+
+### New
+- **Controls for each game** in the built-in player. **Select + Start** → **Controls** lists
+  the game's buttons by the names the emulator gives them, with the controller button that does
+  each one, shown as printed on your pad. Choose a game button, then press the one you want for
+  it; the two swap, so no button is lost. Saved for that game only; **Reset to standard layout**
+  undoes it.
+- **The keyboard reaches the game** in the built-in player, so emulators that use it work as in
+  RetroArch — **Tab** opens MAME's own menu in arcade games, including *Input (this game)*.
+
+### Fixed
+- The built-in player can no longer get stuck while closing a game: once the save is written,
+  it leaves after 8 seconds even if the emulator doesn't finish shutting down.
+
 ## [0.4.0] — 2026-11-04 · "Player One"
 
 Insert Coin can now play games itself, and big collections are much tidier to browse.

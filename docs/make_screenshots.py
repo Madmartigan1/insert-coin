@@ -160,9 +160,18 @@ def main():
     _, snap, _ = draw_art(pygame, lambda n: pygame.font.Font(fp, n), "Star Pilot X", root)
     W, H = app.screen.get_size(); app.screen.fill((0, 0, 0))
     g = pygame.transform.scale(snap, (H * 4 // 3, H)); app.screen.blit(g, ((W - g.get_width()) // 2, 0))
-    p.draw_menu()
+    p.mode = "pause"; p.draw_menu()
     pygame.image.save(pygame.transform.smoothscale(app.screen, SIZE), os.path.join(OUT, "game_menu.png"))
     print("wrote", os.path.join("docs", "screenshots", "game_menu.png"))
+    # ... and its Controls screen, with made-up button names and one button moved
+    E = eng
+    p.descs = {E["B_"]: "Fire", E["A_"]: "Jump", E["Y_"]: "Bomb", E["X_"]: "Shield", E["L_"]: "Turn left",
+               E["R_"]: "Turn right", E["SELECT"]: "Coin", E["START"]: "Start"}
+    p.remap = {E["B_"]: E["R_"], E["R_"]: E["B_"]}; p.title = "Star Pilot X"; p.game_name = "Star Pilot X"
+    p.style = "xbox"; p.mode = "controls"; p.ctl_sel = 0
+    app.screen.fill((0, 0, 0)); app.screen.blit(g, ((W - g.get_width()) // 2, 0)); p.draw_menu()
+    pygame.image.save(pygame.transform.smoothscale(app.screen, SIZE), os.path.join(OUT, "game_controls.png"))
+    print("wrote", os.path.join("docs", "screenshots", "game_controls.png"))
     app.raw[1] = None
     app.start_setup(1, name="USB Gamepad", guid="demo", baseline={})
     app.setup["step"] = 4; save("controller_setup")

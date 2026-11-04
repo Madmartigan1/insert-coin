@@ -945,7 +945,7 @@ class App:
             if os.path.exists(ralog): os.replace(ralog, f"{LOGDIR}/{kind}-previous.log")
             if engine:
                 with open(ralog, "w") as out:
-                    rc = subprocess.run([sys.executable, f"{HERE}/engine.py", g.core, g.path] + (["--windowed"] if self.windowed else []),
+                    rc = subprocess.run([sys.executable, f"{HERE}/engine.py", g.core, g.path, "--title", g.title] + (["--windowed"] if self.windowed else []),
                                         stdout=out, stderr=subprocess.STDOUT).returncode
                 if rc and time.time() - t0 < 10:                     # didn't start: let RetroArch try it instead
                     log.warning("Built-in player could not start it (exit %s), trying RetroArch", rc)
