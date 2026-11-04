@@ -978,7 +978,11 @@ class App:
         sid, gid = self.sys["id"], self.cur_gi()
         self.lib.refresh_specials()
         self.si = next((i for i, s in enumerate(self.lib.systems) if s["id"] == sid), 0); self.gi[sid] = gid
-        if took < 3: self.err("The game closed straight away - it may need a different core")
+        quit_by_user = False
+        if engine:
+            try: quit_by_user = "Quit chosen from the game menu" in open(ralog, errors="replace").read()
+            except OSError: pass
+        if took < 3 and not quit_by_user: self.err("The game closed straight away - it may need a different core")
 
     # -- input handling with key repeat
     REPEAT_FIRST, REPEAT = 0.32, 0.075
