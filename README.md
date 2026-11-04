@@ -267,6 +267,8 @@ can overwrite each other's settings.
 | `~/.cache/insert-coin/meta/` | Cached year/publisher lookups |
 | `~/.config/insert-coin/controllers.json` | Button set-ups for controllers that aren't recognised automatically |
 | `~/.config/insert-coin/settings.json` | Your settings (currently: menu sounds on or off) |
+| `~/.local/state/insert-coin/insert-coin.log` | A log of start-ups, game launches and how each one ended, and any errors (kept to about 1 MB) |
+| `~/.local/state/insert-coin/retroarch-last.log` | RetroArch's detailed log of the last game played (`retroarch-previous.log`: the one before) |
 
 **Note:** RetroArch saves its settings when it closes, so the in-game shortcuts
 (Select + Start to quit, L3 + R3 for the menu) become part of your RetroArch configuration
@@ -284,6 +286,7 @@ and also work when you run RetroArch on its own. You can change them in RetroArc
 | **Controller does nothing** | Press a button: an unrecognised controller opens the set-up screen. If nothing happens, check the controller works in RetroArch (`retroarch --version`, Settings → Input). Keyboard controls always work. |
 | **Set up a controller wrongly** | **B** on the home screen → **Set up controller** to do it again, or delete `~/.config/insert-coin/controllers.json`. |
 | **Can't quit a game with the controller** | Press Select + Start together. If that was changed in RetroArch, use your RetroArch hotkey or the Esc key. |
+| **Something crashed or closed unexpectedly** | Look at `~/.local/state/insert-coin/insert-coin.log` — it records each launch and how RetroArch ended — and at `retroarch-last.log` next to it for the game's details. Attach both when [reporting a problem](CONTRIBUTING.md). |
 | **No menu sounds** | Check **B** on the home screen shows **Sound: On**, and that your system volume is up. Without a working audio device Insert Coin simply runs silently. Game sound is handled by RetroArch and isn't affected. |
 | **Stutters while scrolling the first time** | Artwork loads in the background on first view, then stays cached for the session. |
 

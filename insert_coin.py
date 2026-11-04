@@ -19,7 +19,7 @@ Options: --windowed   run in a window (for testing)
 """
 __version__ = "0.3.0"
 
-import json, os, re, sys, time, random, threading, subprocess, collections
+import json, os, re, sys, time, random, threading, subprocess, collections, logging, faulthandler, platform
 
 os.environ.setdefault("PYGAME_HIDE_SUPPORT_PROMPT", "1")
 import pygame
@@ -29,6 +29,21 @@ HOME = os.path.expanduser("~")
 RA = f"{HOME}/.config/retroarch"
 APPDIR = f"{HOME}/.local/share/insert-coin"
 CACHE = f"{HOME}/.cache/insert-coin"
+LOGDIR = f"{os.environ.get('XDG_STATE_HOME') or HOME + '/.local/state'}/insert-coin"
+log = logging.getLogger("insert-coin")
+
+
+def start_log():
+    """insert-coin.log: start-up, every game launch and how it ended, errors and crashes (kept to ~1 MB)."""
+    try:
+        os.makedirs(LOGDIR, exist_ok=True)
+        path = f"{LOGDIR}/insert-coin.log"
+        if os.path.exists(path) and os.path.getsize(path) > 1_000_000: os.replace(path, path + ".1")
+        h = logging.FileHandler(path, encoding="utf-8")
+    except Exception: return                                        # no log is no reason not to run
+    h.setFormatter(logging.Formatter("%(asctime)s %(levelname)-7s %(message)s", "%Y-%m-%d %H:%M:%S"))
+    log.addHandler(h); log.setLevel(logging.INFO)
+    faulthandler.enable(h.stream)                                   # hard crashes (segfaults) too
 W, H = 1920, 1080
 
 # ---------------------------------------------------------------- systems
@@ -520,6 +535,13 @@ class App:
         self.style = "keyboard"                                    # button hints follow the last device used
         self.open_pads()
         if self.pad_style: self.cur_pad, self.style = next(iter(self.pad_style.items()))
+        log.info("Insert Coin %s started (Python %s, pygame-ce %s, SDL %s, %s)", __version__, platform.python_version(),
+                 pygame.version.ver, ".".join(map(str, pygame.get_sdl_version())), platform.platform())
+        log.info("%d systems, %d games; sound %s (%s)", sum(not s["special"] for s in self.lib.systems),
+                 sum(len(s["games"]) for s in self.lib.systems if not s["special"]),
+                 "on" if self.sfx.enabled else "off", "audio ready" if self.sfx.snd else "no audio device")
+        for c in self.pads.values(): log.info("Controller: %s (%s)", c.name, self.pad_style.get(c.as_joystick().get_instance_id()))
+        for j in self.raw.values(): log.info("Controller without SDL mapping: %s (%s)", j.get_name(), "set up" if j.get_instance_id() in self.raw_map else "not set up")
         self.screen_mode = "systems"                              # systems | games | quit
         self.si = next((i for i, s in enumerate(self.lib.systems) if not s["special"]), 0)
         self.gi = {}                                              # system id -> selected game index
@@ -641,7 +663,7 @@ class App:
 
     def say(self, msg, secs=2.0): self.toast = (msg, time.time() + secs)
 
-    def err(self, msg): self.say(msg); self.sfx.play("error")
+    def err(self, msg): self.say(msg); self.sfx.play("error"); log.warning(msg)
 
     # -- actions
     def move(self, d):
@@ -681,7 +703,7 @@ class App:
         elif self.screen_mode == "quit":
             choice = self.POWER_MENU[self.quit_sel]
             if choice == "Resume": self.screen_mode = "systems"; self.sfx.play("back")
-            elif choice == "Exit Insert Coin": self.running = False
+            elif choice == "Exit Insert Coin": self.running = False; log.info("Exit chosen from the menu")
             elif choice.startswith("Sound"): self.toggle_sound()
             else: self.sfx.play("select"); self.setup_from_menu()
 
@@ -728,26 +750,39 @@ class App:
         os.makedirs(APPDIR, exist_ok=True)
         with open(f"{APPDIR}/launch.cfg", "w") as f: f.write(LAUNCH_CFG)
         pygame.display.quit()
-        t0 = time.time()
+        t0 = time.time(); ralog = f"{LOGDIR}/retroarch-last.log"; rc = None
+        log.info("Launch: %s | %s | %s", g.label, os.path.basename(g.core), g.path)
         try:
-            subprocess.run(["retroarch", "-L", g.core, g.path, f"--appendconfig={APPDIR}/launch.cfg"],
-                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            os.makedirs(LOGDIR, exist_ok=True)
+            if os.path.exists(ralog): os.replace(ralog, f"{LOGDIR}/retroarch-previous.log")
+            rc = subprocess.run(["retroarch", "--verbose", f"--log-file={ralog}", "-L", g.core, g.path,
+                                 f"--appendconfig={APPDIR}/launch.cfg"],
+                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode
         except Exception as e:
             self.err(f"Could not start RetroArch: {e}")
+        took = time.time() - t0
+        how = ("ended normally" if rc == 0 else f"was killed by signal {-rc} (crash)" if rc is not None and rc < 0
+               else f"exited with code {rc}" if rc is not None else "did not start")
+        (log.info if rc == 0 else log.warning)("RetroArch %s after %d min %02d s (log: %s)", how, took // 60, took % 60, ralog)
+        if rc:                                                       # keep the clues next to the event
+            try:
+                errs = [ln.rstrip() for ln in open(ralog, errors="replace") if "[ERROR]" in ln or "[WARN]" in ln]
+                for ln in errs[-15:]: log.warning("  retroarch: %s", ln)
+            except Exception: pass
         pygame.display.init(); self.open_display(); self.open_pads(); self.sfx.open()
         self.img.cache.clear(); self.prev_bg = None
         pygame.event.clear(); self.hold.clear()
         sid, gid = self.sys["id"], self.cur_gi()
         self.lib.refresh_specials()
         self.si = next((i for i, s in enumerate(self.lib.systems) if s["id"] == sid), 0); self.gi[sid] = gid
-        if time.time() - t0 < 3: self.err("The game closed straight away - it may need a different core")
+        if took < 3: self.err("The game closed straight away - it may need a different core")
 
     # -- input handling with key repeat
     REPEAT_FIRST, REPEAT = 0.32, 0.075
 
     def press(self, act):
         if not self.lib.systems:                                    # empty setup: only "exit" does anything
-            if act == "b": self.running = False
+            if act == "b": self.running = False; log.info("Exit (no games found)")
             return
         if act in ("left", "right", "up", "down"):
             d = -1 if act in ("left", "up") else 1
@@ -782,7 +817,7 @@ class App:
             for d in (self.raw, self.raw_map, self.pad_style, self.pad_quit): d.pop(jid, None)
             if self.cur_pad == jid: self.cur_pad, self.style = next(iter(self.pad_style.items()), (None, "keyboard"))
         if self.screen_mode == "setup":                            # the set-up screen owns the input
-            if e.type == pygame.QUIT: self.running = False
+            if e.type == pygame.QUIT: self.running = False; log.info("Asked to close (window closed, log-out or a stop signal)")
             elif e.type in JOY and jid == self.setup["iid"]: self.setup_input(e)
             elif (e.type == pygame.KEYDOWN and e.key == pygame.K_ESCAPE) or \
                  (e.type == pygame.CONTROLLERBUTTONDOWN and e.button == pygame.CONTROLLER_BUTTON_B): self.cancel_setup()
@@ -799,7 +834,7 @@ class App:
         elif e.type in (pygame.CONTROLLERBUTTONDOWN, pygame.CONTROLLERAXISMOTION) and hasattr(e, "instance_id"):
             if e.type == pygame.CONTROLLERBUTTONDOWN or abs(e.value) > 16000:
                 if e.instance_id in self.pad_style: self.cur_pad, self.style = e.instance_id, self.pad_style[e.instance_id]
-        if e.type == pygame.QUIT: self.running = False
+        if e.type == pygame.QUIT: self.running = False; log.info("Asked to close (window closed, log-out or a stop signal)")
         elif e.type == pygame.KEYDOWN and e.key in K: self.set_hold(K[e.key], True)
         elif e.type == pygame.KEYUP and e.key in K: self.set_hold(K[e.key], False)
         elif e.type in (pygame.CONTROLLERBUTTONDOWN, pygame.CONTROLLERBUTTONUP):
@@ -1128,4 +1163,10 @@ if __name__ == "__main__":
     a = sys.argv[1:]
     shot = a[a.index("--shot") + 1] if "--shot" in a else None
     if shot: os.environ["SDL_VIDEODRIVER"] = "dummy"; os.environ["SDL_AUDIODRIVER"] = "dummy"
-    App(windowed="--windowed" in a, shot=shot).run()
+    if not shot: start_log()
+    try:
+        App(windowed="--windowed" in a, shot=shot).run()
+        log.info("Insert Coin closed")
+    except BaseException as e:
+        if not isinstance(e, SystemExit): log.exception("Insert Coin stopped because of an error")
+        raise
