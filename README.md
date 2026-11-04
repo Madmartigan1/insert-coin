@@ -29,6 +29,7 @@ just your games, the way a console shows them.
 - [Files Insert Coin reads and writes](#files-insert-coin-reads-and-writes)
 - [Troubleshooting](#troubleshooting)
 - [Uninstall](#uninstall)
+- [Changelog](CHANGELOG.md)
 - [Legal](#legal)
 - [License](#license)
 
@@ -288,6 +289,7 @@ and also work when you run RetroArch on its own. You can change them in RetroArc
 | **Can't quit a game with the controller** | Press Select + Start together. If that was changed in RetroArch, use your RetroArch hotkey or the Esc key. |
 | **Something crashed or closed unexpectedly** | Look at `~/.local/state/insert-coin/insert-coin.log` — it records each launch and how RetroArch ended — and at `retroarch-last.log` next to it for the game's details. Attach both when [reporting a problem](CONTRIBUTING.md). |
 | **No menu sounds** | Check **B** on the home screen shows **Sound: On**, and that your system volume is up. Without a working audio device Insert Coin simply runs silently. Game sound is handled by RetroArch and isn't affected. |
+| **Sticks feel swapped in an N64 shooter** | Many N64 shooters walk with the C-buttons and aim with the stick, and RetroArch puts the C-buttons on your right stick. In the game, open RetroArch's menu (**L3 + R3**) → *Controls → Port 1 Controls*, swap the Left and Right Analog entries, then *Manage Remap Files → Save Game Remap File*. It applies to that game only. |
 | **Stutters while scrolling the first time** | Artwork loads in the background on first view, then stays cached for the session. |
 
 ## Uninstall

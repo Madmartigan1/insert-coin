@@ -23,7 +23,8 @@ Open an issue and include:
    - Python version (`python3 --version`) and pygame-ce version
      (`~/.local/share/insert-coin/venv/bin/python -c "import pygame; print(pygame.version.ver)"`)
    - Controller model, if input is involved
-4. **Output**: run Insert Coin from a terminal and paste anything it prints.
+4. **Logs**: `~/.local/state/insert-coin/insert-coin.log`, and `retroarch-last.log` beside it for
+   game problems. They list your game names and paths, so trim anything you'd rather not share.
 5. For game-launch problems: the **system**, the **game's playlist label**, and the **core** —
    and whether the game works when started from RetroArch directly.
 
@@ -99,6 +100,7 @@ somewhere temporary.
 Insert Coin uses [semantic versioning](https://semver.org/): `MAJOR.MINOR.PATCH`.
 Before 1.0, minor versions (0.2, 0.3, …) may add features and change behaviour;
 patch versions (0.1.1, …) are fixes only. The version lives in `__version__` in `insert_coin.py`.
+Every release gets an entry in [CHANGELOG.md](CHANGELOG.md).
 
 ## License
 
