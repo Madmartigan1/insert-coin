@@ -254,7 +254,8 @@ def group_versions(games, saves):
 
 
 class Library:
-    def __init__(self):
+    def __init__(self, one_per_game=True):
+        self.one_per_game = one_per_game                            # False: every ROM in the playlists, as RetroArch lists them
         self.defaults = {}
         self.hidden = 0                                             # duplicate copies not shown
         self.systems = []          # list of dicts: id, name, maker, color, games, special
@@ -280,8 +281,9 @@ class Library:
         for name, d in sorted(pls.items(), key=lambda kv: (ORDER.get(kv[0], 99), kv[0])):
             games = [Game(it, name + ".lpl", self.defaults[name + ".lpl"]) for it in d.get("items", []) if it.get("path")]
             if not games: continue                                  # tidy: hide empty systems
-            n = len(games); games = dedupe(games, saves); self.hidden += n - len(games)
-            games = group_versions(games, saves)
+            if self.one_per_game:
+                n = len(games); games = dedupe(games, saves); self.hidden += n - len(games)
+                games = group_versions(games, saves)
             games.sort(key=lambda g: g.key)
             fn, maker, col = FRIENDLY.get(name, (name.split(" - ")[-1], name.split(" - ")[0], (90, 100, 130)))
             self.systems.append({"id": name, "name": fn, "maker": maker, "color": col, "games": games, "special": None})
@@ -300,10 +302,12 @@ class Library:
         self.systems = [s for s in self.systems if not s["special"]]
         hist = self._read(f"{RA}/content_history.lpl") or {"items": []}
         self.favorites_raw = self._read(f"{RA}/content_favorites.lpl") or {"version": "1.5", "items": []}
-        fav = sorted(dedupe(self._special_games(self.favorites_raw.get("items", [])), set()), key=lambda g: g.key)
+        fav = self._special_games(self.favorites_raw.get("items", []))
+        fav = sorted(dedupe(fav, set()) if self.one_per_game else fav, key=lambda g: g.key)
         seen, rec = set(), []
         for g in self._special_games(hist.get("items", [])):
-            if (g.db, g.label) not in seen: seen.add((g.db, g.label)); rec.append(g)
+            k = (g.db, g.label) if self.one_per_game else g.path
+            if k not in seen: seen.add(k); rec.append(g)
         specials = []
         if fav: specials.append({"id": "favorites", "name": "Favorites", "maker": "Your picks", "color": (230, 180, 40), "games": fav, "special": "fav"})
         if rec: specials.append({"id": "recent", "name": "Recently Played", "maker": "Pick up where you left off", "color": (60, 170, 200), "games": rec[:60], "special": "recent"})
@@ -560,7 +564,7 @@ class Sounds:
         except Exception: pass
 
 
-DEFAULT_SETTINGS = {"sound": True, "engine": False}
+DEFAULT_SETTINGS = {"sound": True, "engine": False, "one_per_game": True}
 
 # Cores the built-in player (engine.py) runs; every other core still goes through RetroArch
 ENGINE_CORES = {"mesen_libretro.so", "fbneo_libretro.so", "mame2003_plus_libretro.so"}
@@ -627,7 +631,7 @@ class App:
         self.sfx = Sounds(enabled=self.settings["sound"], start=not shot)
         self.open_display()
         self.fonts = Fonts()
-        self.lib = Library()
+        self.lib = Library(one_per_game=self.settings["one_per_game"])
         self.meta = Meta({s["id"] for s in self.lib.systems if not s["special"]})
         self.img = Images(sync=bool(shot))
         self.pads = {}; self.pad_style = {}                         # device index -> Controller; instance id -> style
@@ -817,7 +821,21 @@ class App:
             elif choice == "Exit Insert Coin": self.running = False; log.info("Exit chosen from the menu")
             elif choice.startswith("Sound"): self.toggle_sound()
             elif choice.startswith("Player"): self.toggle_engine()
+            elif choice.startswith("Games"): self.toggle_grouping()
             else: self.sfx.play("select"); self.setup_from_menu()
+
+    def toggle_grouping(self):
+        """One entry per game (copies hidden, versions under X) or every ROM, exactly as the playlists list them."""
+        self.settings["one_per_game"] = not self.settings["one_per_game"]
+        try: save_settings(self.settings)
+        except Exception as e: self.say(f"Could not save the setting: {e}")
+        sid = self.sys["id"] if self.lib.systems else None
+        self.lib = Library(one_per_game=self.settings["one_per_game"]); self.gi = {}
+        self.si = next((i for i, s in enumerate(self.lib.systems) if s["id"] == sid), 0); self.spos = float(self.si)
+        self.sfx.play("select")
+        total = sum(len(s["games"]) for s in self.lib.systems if not s["special"])
+        self.say(f"One entry per game: {total:,} games (other versions under X)" if self.settings["one_per_game"]
+                 else f"Showing every ROM: {total:,} entries", 3.0)
 
     def toggle_engine(self):
         self.settings["engine"] = not self.settings.get("engine")
@@ -1208,7 +1226,8 @@ class App:
     @property
     def POWER_MENU(self):
         return ("Resume", f"Sound: {'On' if self.sfx.enabled else 'Off'}",
-                f"Player: {'Built-in (beta)' if self.settings.get('engine') else 'RetroArch'}", "Set up controller", "Exit Insert Coin")
+                f"Player: {'Built-in (beta)' if self.settings.get('engine') else 'RetroArch'}",
+                f"Games: {'One per game' if self.settings['one_per_game'] else 'Show all'}", "Set up controller", "Exit Insert Coin")
 
     def draw_quit(self):
         self.draw_systems(hints=False)
@@ -1280,7 +1299,7 @@ class App:
          "versions": self.draw_versions}[self.screen_mode]()
         if self.toast and time.time() < self.toast[1]:
             f = self.fonts(30); w = f.size(self.toast[0])[0] + 60
-            r = pygame.Rect(0, 0, w, 64); r.midtop = (W / 2, 150)
+            r = pygame.Rect(0, 0, w, 64); r.midtop = (W / 2, H - 150 if self.screen_mode == "quit" else 150)   # clear of the menu
             box = pygame.Surface(r.size, pygame.SRCALPHA); rrect(box, (0, 0, 0, 200), box.get_rect(), 32); self.screen.blit(box, r)
             text(self.screen, f, self.toast[0], r.center, anchor="center", shadow=False)
 
