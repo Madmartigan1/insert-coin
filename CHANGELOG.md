@@ -4,7 +4,9 @@ All notable changes to Insert Coin. Versions follow [semantic versioning](https:
 before 1.0, minor versions add features and patch versions fix bugs.
 Each version is also a [GitHub Release](https://github.com/Madmartigan1/insert-coin/releases).
 
-## [Unreleased]
+## [0.4.1] — 2026-11-04 · "Button masher"
+
+Set up the buttons for each game — handy for fighting games — and MAME's own Tab menu is back.
 
 ### New
 - **Controls for each game** in the built-in player. **Select + Start** → **Controls** lists
