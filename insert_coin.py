@@ -2,22 +2,24 @@
 """Insert Coin - a controller-driven, console-style front end for RetroArch.
 
 It reads RetroArch's own playlists, thumbnails, favorites and history, and
-launches games through RetroArch with each game's assigned core. Nothing is
-duplicated: whatever works in RetroArch works here.
+launches games with each game's assigned core: through RetroArch, or in its own
+built-in player (engine.py, beta; B menu > Player). Nothing is duplicated:
+whatever works in RetroArch works here.
 
 Controls (Xbox-style pad; keyboard in brackets)
   D-pad / left stick  move            [arrows]
   A                   open / play     [Enter]
   B                   back            [Backspace / Esc]
   Y                   toggle favorite [F]
+  X                   versions of a game [V]
   LB / RB             previous / next letter   [PageUp / PageDown]
   Menu sounds can be switched off in the B menu (saved in ~/.config/insert-coin/settings.json).
-  In a game: Select+Start quits back here, click both sticks for RetroArch's menu.
+  In a game: Select+Start opens the game menu (Resume / Quit game, or RetroArch's Quick Menu).
 
 Options: --windowed   run in a window (for testing)
          --shot DIR   render sample screens to PNG files and exit (no display needed)
 """
-__version__ = "0.3.1"
+__version__ = "0.4.0"
 
 import json, os, re, sys, time, random, threading, subprocess, collections, logging, faulthandler, platform
 
@@ -69,10 +71,17 @@ FRIENDLY = {k: (n, m, c) for k, n, m, c in SYSTEMS}
 ORDER = {k: i for i, (k, *_ ) in enumerate(SYSTEMS)}
 
 LAUNCH_CFG = """# Written by Insert Coin: controller shortcuts while a game runs
-input_quit_gamepad_combo = "4"
+# Select + Start opens RetroArch's menu (Quick Menu > Resume / Close Content), like the built-in player's pause
+# menu; Close Content then returns to Insert Coin (only for games started from the command line, i.e. by us).
+input_quit_gamepad_combo = "0"
+input_menu_toggle_gamepad_combo = "4"
+quit_on_close_content = "2"
 quit_press_twice = "false"
-input_menu_toggle_gamepad_combo = "2"
 video_fullscreen = "true"
+"""
+# Added for `--windowed` (testing): a window, and nothing of this saved into retroarch.cfg
+LAUNCH_CFG_WINDOWED = """video_fullscreen = "false"
+config_save_on_exit = "false"
 """
 
 
@@ -101,24 +110,25 @@ def controller_style(name, guid=""):
 # action -> how its button looks, per style. kinds: letter (round button), shape (PlayStation symbol), pill, key
 GLYPHS = {
     "xbox": {"a": ("letter", "A", (90, 190, 90)), "b": ("letter", "B", (220, 80, 70)),
-             "y": ("letter", "Y", (230, 190, 50)), "lbrb": ("pill", "LB RB", (120, 130, 150))},
+             "y": ("letter", "Y", (230, 190, 50)), "x": ("letter", "X", (70, 130, 230)), "lbrb": ("pill", "LB RB", (120, 130, 150))},
     "playstation": {"a": ("shape", "cross", (120, 160, 245)), "b": ("shape", "circle", (235, 90, 95)),
-                    "y": ("shape", "triangle", (70, 200, 160)), "lbrb": ("pill", "L1 R1", (120, 130, 150))},
+                    "y": ("shape", "triangle", (70, 200, 160)), "x": ("shape", "square", (230, 130, 200)), "lbrb": ("pill", "L1 R1", (120, 130, 150))},
     "nintendo": {"a": ("letter", "A", (110, 116, 132)), "b": ("letter", "B", (110, 116, 132)),
-                 "y": ("letter", "Y", (110, 116, 132)), "lbrb": ("pill", "L R", (120, 130, 150))},
+                 "y": ("letter", "Y", (110, 116, 132)), "x": ("letter", "X", (110, 116, 132)), "lbrb": ("pill", "L R", (120, 130, 150))},
     "keyboard": {"a": ("key", "Enter", None), "b": ("key", "Esc", None),
-                 "y": ("key", "F", None), "lbrb": ("key", "PgUp PgDn", None)},
+                 "y": ("key", "F", None), "x": ("key", "V", None), "lbrb": ("key", "PgUp PgDn", None)},
 }
 GLYPHS["snes"] = dict(GLYPHS["nintendo"])                        # replicas: same printed letters as Nintendo
 GLYPHS["generic"] = {"a": ("letter", "A", (110, 116, 132)), "b": ("letter", "B", (110, 116, 132)),   # set-up pads
-                     "y": ("letter", "Y", (110, 116, 132)), "lbrb": ("pill", "LB RB", (120, 130, 150))}
+                     "y": ("letter", "Y", (110, 116, 132)), "x": ("letter", "X", (110, 116, 132)), "lbrb": ("pill", "LB RB", (120, 130, 150))}
 QUIT_COMBO = {"xbox": "Back + Start", "playstation": "Share + Options", "nintendo": "Minus + Plus", "keyboard": "Esc",
               "generic": "Select + Start", "snes": "Select + Start"}
 
 # controller set-up for pads SDL doesn't recognise: (action, button shown, what it does, optional)
 SETUP_STEPS = [("up", "up", "Up", False), ("down", "down", "Down", False), ("left", "left", "Left", False),
                ("right", "right", "Right", False), ("a", "A", "Select / play", False), ("b", "B", "Back", False),
-               ("y", "Y", "Favorite", True), ("lb", "LB", "Previous letter", True), ("rb", "RB", "Next letter", True)]
+               ("y", "Y", "Favorite", True), ("x", "X", "Other versions", True),
+               ("lb", "LB", "Previous letter", True), ("rb", "RB", "Next letter", True)]
 CONFDIR = os.environ.get("INSERT_COIN_CONFIG") or os.path.expanduser("~/.config/insert-coin")
 
 
@@ -131,6 +141,13 @@ def quit_combo(style, name="", guid=""):
     if style == "playstation" and (product in ("0ce6", "0df2") or "dualsense" in n or "ps5" in n):
         return "Create + Options"
     return QUIT_COMBO[style]
+
+
+def split_archive(path):
+    """RetroArch's 'archive.zip#file.nes' -> ('archive.zip', 'file.nes'). Only a '#' straight after .zip / .7z
+    counts: folder names may contain '#' themselves (e.g. '# Translations #')."""
+    m = re.search(r"(?i)\.(zip|7z)#", path)
+    return (path[:m.end() - 1], path[m.end():]) if m else (path, "")
 
 
 def sanitize(s):
@@ -166,10 +183,10 @@ def thumb_system(db_name):
 
 # ---------------------------------------------------------------- data
 class Game:
-    __slots__ = ("label", "path", "core", "db", "title", "letter", "key", "system")
+    __slots__ = ("label", "path", "core", "db", "title", "letter", "key", "system", "versions")
 
     def __init__(self, it, playlist_db, default_core):
-        self.label = it.get("label") or os.path.splitext(os.path.basename(it["path"].split("#")[0]))[0]
+        self.label = it.get("label") or os.path.splitext(os.path.basename(split_archive(it["path"])[0]))[0]
         self.path = it["path"]
         c = it.get("core_path") or ""
         self.core = c if c not in ("", "DETECT") and os.path.exists(c) else default_core
@@ -178,14 +195,78 @@ class Game:
         self.letter = letter_of(self.label)
         self.key = sort_key(self.label)
         self.system = (self.db or "")[:-4] if (self.db or "").endswith(".lpl") else self.db
+        self.versions = None                                        # other regions / translations / dumps of this game
 
     def thumb(self, kind):
         return f"{RA}/thumbnails/{thumb_system(self.db)}/{kind}/{sanitize(self.label)}.png"
 
 
+def rom_stem(path):
+    """The game's own file name without extension: 'a.zip#Game (USA).nes' -> 'Game (USA)'. Saves are named after it."""
+    return os.path.splitext(os.path.basename(split_archive(path)[1] or path))[0]
+
+
+def save_names():
+    """Names of every battery save (RetroArch's and Insert Coin's), to prefer the copy of a game you've played."""
+    names = set()
+    for d in (f"{RA}/saves", f"{APPDIR}/saves"):
+        for root, _, files in os.walk(d):
+            names.update(os.path.splitext(f)[0].lower() for f in files)
+    return names
+
+
+def dedupe(games, saves):
+    """One entry per game. RetroArch names every copy of the same game identically, so copies kept in several
+    folders (a main folder, a "top 100", ...) show once. The copy shown is the one with a save, else the one
+    in the shallowest folder (usually the main collection), so its save keeps working."""
+    best = {}
+    for g in games:
+        score = (rom_stem(g.path).lower() not in saves, g.path.count("/"), len(g.path))
+        if g.label not in best or score < best[g.label][0]: best[g.label] = (score, g)
+    return [g for _, g in best.values()]
+
+
+ROMAN = {"ii": "2", "iii": "3", "iv": "4", "v": "5", "vi": "6"}
+
+def title_key(title):
+    """'The Pixel Knights' / 'Pixel Knights, The', 'Star Pilot II' / 'Star Pilot 2', 'Turbo-Tanks' / 'Turbo Tanks'."""
+    t = re.sub(r"^the\s+", "", title.lower())
+    words = re.findall(r"[a-z0-9]+", t)
+    return " ".join(ROMAN.get(w, w) for w in words)
+
+REGION_RANK = [(r"\b(usa|us|u|ue|ju|jp-us|world)\b", 0), (r"\b(europe|eu|e)\b", 1), (r"\b(japan|j|jp)\b", 2)]
+
+def version_score(g, saves):
+    """Lower is better: the copy you've played, then the USA / World release, then Europe, then Japan;
+    translations, hacks, alternates, betas and protos after the clean dumps."""
+    tagtext = " ".join(tags(g.label)).lower()
+    region = next((r for pat, r in REGION_RANK if re.search(pat, tagtext)), 3)
+    odd = bool(re.search(r"\[(tr|t[+-]|h|b|p|a|o)|pt-br|\balt\b|beta|proto|hack|sample|demo|\(t\)", g.label.lower()))
+    return (rom_stem(g.path).lower() not in saves, odd, region, g.path.count("/"), len(g.label))
+
+def group_versions(games, saves):
+    """One entry per game title; the best version leads and carries the rest in .versions (shown with X)."""
+    groups = collections.OrderedDict()
+    for g in games: groups.setdefault((g.system, title_key(g.title)), []).append(g)
+    # a name without its subtitle ("Star Pilot 2") joins the one game it starts ("Star Pilot II - Return of the Comet")
+    by_short = collections.defaultdict(list)
+    for (sysid, key), vs in groups.items():
+        if " - " in vs[0].title: by_short[(sysid, title_key(vs[0].title.split(" - ")[0]))].append((sysid, key))
+    for k in list(groups):
+        if k in by_short and len(by_short[k]) == 1 and by_short[k][0] != k and " - " not in groups[k][0].title:
+            groups[by_short[k][0]] += groups.pop(k)
+    out = []
+    for vs in groups.values():
+        vs.sort(key=lambda g: version_score(g, saves))
+        lead = vs[0]; lead.versions = vs if len(vs) > 1 else None; out.append(lead)
+    return out
+
+
 class Library:
-    def __init__(self):
+    def __init__(self, one_per_game=True):
+        self.one_per_game = one_per_game                            # False: every ROM in the playlists, as RetroArch lists them
         self.defaults = {}
+        self.hidden = 0                                             # duplicate copies not shown
         self.systems = []          # list of dicts: id, name, maker, color, games, special
         self.load()
 
@@ -205,9 +286,13 @@ class Library:
         for name, d in pls.items():
             dc = d.get("default_core_path") or ""
             self.defaults[name + ".lpl"] = dc if dc and os.path.exists(dc) else None
+        saves = save_names(); self.hidden = 0
         for name, d in sorted(pls.items(), key=lambda kv: (ORDER.get(kv[0], 99), kv[0])):
             games = [Game(it, name + ".lpl", self.defaults[name + ".lpl"]) for it in d.get("items", []) if it.get("path")]
             if not games: continue                                  # tidy: hide empty systems
+            if self.one_per_game:
+                n = len(games); games = dedupe(games, saves); self.hidden += n - len(games)
+                games = group_versions(games, saves)
             games.sort(key=lambda g: g.key)
             fn, maker, col = FRIENDLY.get(name, (name.split(" - ")[-1], name.split(" - ")[0], (90, 100, 130)))
             self.systems.append({"id": name, "name": fn, "maker": maker, "color": col, "games": games, "special": None})
@@ -217,7 +302,7 @@ class Library:
     def _special_games(self, items):
         out = []
         for it in items:
-            if not it.get("path") or not os.path.exists(it["path"].split("#")[0]): continue
+            if not it.get("path") or not os.path.exists(split_archive(it["path"])[0]): continue
             db = it.get("db_name") or ""
             out.append(Game(it, db, self.defaults.get(db)))
         return out
@@ -226,20 +311,28 @@ class Library:
         self.systems = [s for s in self.systems if not s["special"]]
         hist = self._read(f"{RA}/content_history.lpl") or {"items": []}
         self.favorites_raw = self._read(f"{RA}/content_favorites.lpl") or {"version": "1.5", "items": []}
-        fav = sorted(self._special_games(self.favorites_raw.get("items", [])), key=lambda g: g.key)
+        fav = self._special_games(self.favorites_raw.get("items", []))
+        fav = sorted(dedupe(fav, set()) if self.one_per_game else fav, key=lambda g: g.key)
         seen, rec = set(), []
         for g in self._special_games(hist.get("items", [])):
-            if g.path not in seen: seen.add(g.path); rec.append(g)
+            k = (g.db, g.label) if self.one_per_game else g.path
+            if k not in seen: seen.add(k); rec.append(g)
         specials = []
         if fav: specials.append({"id": "favorites", "name": "Favorites", "maker": "Your picks", "color": (230, 180, 40), "games": fav, "special": "fav"})
         if rec: specials.append({"id": "recent", "name": "Recently Played", "maker": "Pick up where you left off", "color": (60, 170, 200), "games": rec[:60], "special": "recent"})
         self.systems = specials + self.systems
         self.fav_paths = {it.get("path") for it in self.favorites_raw.get("items", [])}
+        self.fav_keys = {(it.get("db_name") or "", it.get("label")) for it in self.favorites_raw.get("items", [])}
+
+    def is_fav(self, g):
+        """A favorite, whichever copy of the game was starred."""
+        return g.path in self.fav_paths or ((g.db or ""), g.label) in self.fav_keys
 
     def toggle_favorite(self, g):
         items = self.favorites_raw.setdefault("items", [])
-        if g.path in self.fav_paths:
-            items[:] = [it for it in items if it.get("path") != g.path]; added = False
+        same = lambda it: it.get("path") == g.path or ((it.get("db_name") or ""), it.get("label")) == ((g.db or ""), g.label)
+        if self.is_fav(g):
+            items[:] = [it for it in items if not same(it)]; added = False
         else:
             items.append({"path": g.path, "label": g.label, "core_path": g.core or "DETECT",
                           "core_name": "DETECT" if not g.core else os.path.basename(g.core).replace("_libretro.so", ""),
@@ -249,7 +342,20 @@ class Library:
         with open(tmp, "w", encoding="utf-8") as f: json.dump(self.favorites_raw, f, indent=2)
         os.replace(tmp, p)
         self.fav_paths = {it.get("path") for it in items}
+        self.fav_keys = {(it.get("db_name") or "", it.get("label")) for it in items}
         return added
+
+    def add_history(self, g):
+        """Put a game at the top of Recently Played (the built-in player's job; RetroArch does it itself)."""
+        p = f"{RA}/content_history.lpl"
+        d = self._read(p) or {"version": "1.5", "items": []}
+        items = [it for it in d.get("items", []) if it.get("path") != g.path]
+        items.insert(0, {"path": g.path, "label": g.label, "core_path": g.core,
+                         "core_name": os.path.basename(g.core).replace("_libretro.so", ""), "crc32": "DETECT", "db_name": g.db or ""})
+        d["items"] = items[:200]; d.setdefault("version", "1.5")
+        tmp = p + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f: json.dump(d, f, indent=2)
+        os.replace(tmp, p)
 
 
 # ---------------------------------------------------------------- metadata (year / publisher) from RetroArch's databases
@@ -317,7 +423,7 @@ class Meta:
         db = g.system or ""
         with self.lock: m = self.data.get(db)
         if not m: return None
-        rom = os.path.splitext(os.path.basename(g.path.split("#")[0]))[0]
+        rom = os.path.splitext(os.path.basename(split_archive(g.path)[0]))[0]
         return m.get("n:" + g.label) or m.get("r:" + rom)
 
 
@@ -467,7 +573,14 @@ class Sounds:
         except Exception: pass
 
 
-DEFAULT_SETTINGS = {"sound": True}
+DEFAULT_SETTINGS = {"sound": True, "engine": False, "one_per_game": True}
+
+# cores the built-in player runs (all draw in software; each was test-booted). N64 needs the graphics card: RetroArch.
+ENGINE_CORES = {"mesen_libretro.so", "fbneo_libretro.so", "mame2003_plus_libretro.so", "mame2003_libretro.so",
+                "fbalpha2012_cps3_libretro.so", "mesen-s_libretro.so", "vbam_libretro.so", "blastem_libretro.so",
+                "picodrive_libretro.so", "mednafen_supergrafx_libretro.so", "mednafen_ngp_libretro.so",
+                "pcsx_rearmed_libretro.so", "stella_libretro.so"}
+HERE = os.path.dirname(os.path.abspath(__file__))
 
 def load_settings():
     try:
@@ -530,7 +643,7 @@ class App:
         self.sfx = Sounds(enabled=self.settings["sound"], start=not shot)
         self.open_display()
         self.fonts = Fonts()
-        self.lib = Library()
+        self.lib = Library(one_per_game=self.settings["one_per_game"])
         self.meta = Meta({s["id"] for s in self.lib.systems if not s["special"]})
         self.img = Images(sync=bool(shot))
         self.pads = {}; self.pad_style = {}                         # device index -> Controller; instance id -> style
@@ -542,8 +655,8 @@ class App:
         if self.pad_style: self.cur_pad, self.style = next(iter(self.pad_style.items()))
         log.info("Insert Coin %s started (Python %s, pygame-ce %s, SDL %s, %s)", __version__, platform.python_version(),
                  pygame.version.ver, ".".join(map(str, pygame.get_sdl_version())), platform.platform())
-        log.info("%d systems, %d games; sound %s (%s)", sum(not s["special"] for s in self.lib.systems),
-                 sum(len(s["games"]) for s in self.lib.systems if not s["special"]),
+        log.info("%d systems, %d games (%d duplicate copies hidden); sound %s (%s)", sum(not s["special"] for s in self.lib.systems),
+                 sum(len(s["games"]) for s in self.lib.systems if not s["special"]), self.lib.hidden,
                  "on" if self.sfx.enabled else "off", "audio ready" if self.sfx.snd else "no audio device")
         for c in self.pads.values(): log.info("Controller: %s (%s)", c.name, self.pad_style.get(c.as_joystick().get_instance_id()))
         for j in self.raw.values(): log.info("Controller without SDL mapping: %s (%s)", j.get_name(), "set up" if j.get_instance_id() in self.raw_map else "not set up")
@@ -553,7 +666,7 @@ class App:
         self.spos = float(self.si); self.gpos = 0.0
         self.toast = None; self.jump = None
         self.prev_bg = None; self.bg_change = 0
-        self.hold = {}; self.quit_sel = 1
+        self.hold = {}; self.quit_sel = 1; self.vlist = []; self.vsel = 0
         self.clock = pygame.time.Clock()
 
     # -- display / input
@@ -580,6 +693,40 @@ class App:
                     m = self.saved_maps.get(j.get_guid())
                     if m: self.use_map(iid, m["map"])
                 except Exception: pass
+
+    def rescan_pads(self):
+        """After a game: controllers may have been unplugged or swapped while it ran, and those events were missed,
+        so rebuild the list from what is connected now. Hints follow the pad last used if it is still there."""
+        pygame.event.pump()
+        last = self.cur_pad
+        self.pads = {}; self.pad_style = {}; self.pad_quit = {}; self.raw = {}; self.raw_map = {}
+        self.open_pads()
+        now = list(self.pad_style)
+        if last in now: return
+        if now:
+            self.cur_pad, self.style = now[-1], self.pad_style[now[-1]]
+            name = next((c.name for c in self.pads.values() if c.as_joystick().get_instance_id() == now[-1]), "Controller")
+            log.info("Controller after the game: %s (%s)", name, self.style)
+        else:
+            self.cur_pad, self.style = None, "keyboard"
+        if self.raw and not now:
+            self.say("Controller connected - press a button on it to set it up", 3.0)
+
+    def pad_plugged(self):
+        """A controller was connected: the button hints switch to it straight away (not only after a button press)."""
+        before = set(self.pad_style) | set(self.raw)
+        self.open_pads()
+        new = [iid for iid in list(self.pad_style) + list(self.raw) if iid not in before]
+        if not new: return                                         # SDL also reports pads that were already there
+        iid = new[-1]
+        name = next((c.name for c in self.pads.values() if c.as_joystick().get_instance_id() == iid), None) or \
+               (self.raw[iid].get_name() if iid in self.raw else "Controller")
+        if iid in self.pad_style:
+            self.cur_pad, self.style = iid, self.pad_style[iid]
+            self.say(f"Controller connected: {name}")
+        else:
+            self.say(f"Controller connected: {name} - press a button on it to set it up", 3.0)
+        log.info("Controller connected: %s (%s)", name, self.pad_style.get(iid, "needs set-up"))
 
     # -- controller set-up for unrecognised pads
     def load_maps(self):
@@ -681,7 +828,14 @@ class App:
                 old = self.cur_gi(); self.gi[self.sys["id"]] = max(0, min(n - 1, old + d)); return self.cur_gi() != old
         elif self.screen_mode == "quit":
             self.quit_sel = (self.quit_sel + (1 if d > 0 else -1)) % len(self.POWER_MENU); return True
+        elif self.screen_mode == "versions":
+            n = len(self.vlist); old = self.vsel; self.vsel = max(0, min(n - 1, self.vsel + (1 if d > 0 else -1))); return self.vsel != old
         return False
+
+    def open_versions(self):
+        g = self.cur_game() if self.screen_mode == "games" else None
+        if not g or not g.versions: return
+        self.vlist = g.versions; self.vsel = 0; self.screen_mode = "versions"; self.sfx.play("menu")
 
     def jump_letter(self, d):
         if self.screen_mode != "games": return
@@ -705,12 +859,37 @@ class App:
         elif self.screen_mode == "games":
             g = self.cur_game()
             if g: self.launch(g)
+        elif self.screen_mode == "versions":
+            self.screen_mode = "games"; self.launch(self.vlist[self.vsel])
         elif self.screen_mode == "quit":
             choice = self.POWER_MENU[self.quit_sel]
             if choice == "Resume": self.screen_mode = "systems"; self.sfx.play("back")
             elif choice == "Exit Insert Coin": self.running = False; log.info("Exit chosen from the menu")
             elif choice.startswith("Sound"): self.toggle_sound()
+            elif choice.startswith("Player"): self.toggle_engine()
+            elif choice.startswith("Games"): self.toggle_grouping()
             else: self.sfx.play("select"); self.setup_from_menu()
+
+    def toggle_grouping(self):
+        """One entry per game (copies hidden, versions under X) or every ROM, exactly as the playlists list them."""
+        self.settings["one_per_game"] = not self.settings["one_per_game"]
+        try: save_settings(self.settings)
+        except Exception as e: self.say(f"Could not save the setting: {e}")
+        sid = self.sys["id"] if self.lib.systems else None
+        self.lib = Library(one_per_game=self.settings["one_per_game"]); self.gi = {}
+        self.si = next((i for i, s in enumerate(self.lib.systems) if s["id"] == sid), 0); self.spos = float(self.si)
+        self.sfx.play("select")
+        total = sum(len(s["games"]) for s in self.lib.systems if not s["special"])
+        self.say(f"One entry per game: {total:,} games (other versions under X)" if self.settings["one_per_game"]
+                 else f"Showing every ROM: {total:,} entries", 3.0)
+
+    def toggle_engine(self):
+        self.settings["engine"] = not self.settings.get("engine")
+        try: save_settings(self.settings)
+        except Exception as e: self.say(f"Could not save the setting: {e}")
+        self.sfx.play("select")
+        self.say("Built-in player: NES, FBNeo and MAME 2003-Plus games run without RetroArch" if self.settings["engine"]
+                 else "All games run in RetroArch", 3.0)
 
     def toggle_sound(self):
         self.settings["sound"] = self.sfx.enabled = not self.sfx.enabled
@@ -730,6 +909,7 @@ class App:
 
     def back(self):
         if self.screen_mode == "games": self.screen_mode = "systems"; self.sfx.play("back")
+        elif self.screen_mode == "versions": self.screen_mode = "games"; self.sfx.play("back")
         elif self.screen_mode == "systems": self.screen_mode = "quit"; self.quit_sel = 0; self.sfx.play("menu")
         else: self.screen_mode = "systems"; self.sfx.play("back")
 
@@ -748,39 +928,63 @@ class App:
     def launch(self, g):
         if not g.core:
             self.err("No core is set for this game yet - assign one in RetroArch"); return
-        if not os.path.exists(g.path.split("#")[0]):
+        if not os.path.exists(split_archive(g.path)[0]):
             self.err("ROM file not found"); return
-        self.sfx.play("coin"); self.draw(); self.splash(g)
-        self.sfx.finish(); self.sfx.close()                          # hand the audio device to RetroArch
-        os.makedirs(APPDIR, exist_ok=True)
-        with open(f"{APPDIR}/launch.cfg", "w") as f: f.write(LAUNCH_CFG)
+        engine = self.settings.get("engine") and os.path.basename(g.core) in ENGINE_CORES
+        who = "Built-in player" if engine else "RetroArch"
+        self.sfx.play("coin"); self.draw(); self.splash(g, engine)
+        self.sfx.finish(); self.sfx.close()                          # hand the audio device to the game
+        os.makedirs(APPDIR, exist_ok=True); os.makedirs(LOGDIR, exist_ok=True)
+        with open(f"{APPDIR}/launch.cfg", "w") as f:
+            f.write(LAUNCH_CFG.replace('video_fullscreen = "true"\n', "") + LAUNCH_CFG_WINDOWED if self.windowed else LAUNCH_CFG)
         pygame.display.quit()
-        t0 = time.time(); ralog = f"{LOGDIR}/retroarch-last.log"; rc = None
-        log.info("Launch: %s | %s | %s", g.label, os.path.basename(g.core), g.path)
+        kind = "engine" if engine else "retroarch"
+        t0 = time.time(); ralog = f"{LOGDIR}/{kind}-last.log"; rc = None
+        log.info("Launch (%s): %s | %s | %s", who, g.label, os.path.basename(g.core), g.path)
         try:
-            os.makedirs(LOGDIR, exist_ok=True)
-            if os.path.exists(ralog): os.replace(ralog, f"{LOGDIR}/retroarch-previous.log")
-            rc = subprocess.run(["retroarch", "--verbose", f"--log-file={ralog}", "-L", g.core, g.path,
-                                 f"--appendconfig={APPDIR}/launch.cfg"],
-                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode
+            if os.path.exists(ralog): os.replace(ralog, f"{LOGDIR}/{kind}-previous.log")
+            if engine:
+                with open(ralog, "w") as out:
+                    rc = subprocess.run([sys.executable, f"{HERE}/engine.py", g.core, g.path] + (["--windowed"] if self.windowed else []),
+                                        stdout=out, stderr=subprocess.STDOUT).returncode
+                if rc and time.time() - t0 < 10:                     # didn't start: let RetroArch try it instead
+                    log.warning("Built-in player could not start it (exit %s), trying RetroArch", rc)
+                    try:
+                        errs = [ln.rstrip() for ln in open(ralog, errors="replace") if "[ERROR]" in ln]
+                        for ln in errs[-5:]: log.warning("  engine: %s", ln)
+                    except Exception: pass
+                    engine, who, kind = False, "RetroArch", "retroarch"
+                    ralog = f"{LOGDIR}/retroarch-last.log"; t0 = time.time()
+                    if os.path.exists(ralog): os.replace(ralog, f"{LOGDIR}/retroarch-previous.log")
+            if not engine:
+                rc = subprocess.run(["retroarch", "--verbose", f"--log-file={ralog}", "-L", g.core, g.path,
+                                     f"--appendconfig={APPDIR}/launch.cfg"],
+                                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode
         except Exception as e:
-            self.err(f"Could not start RetroArch: {e}")
+            self.err(f"Could not start {who}: {e}")
         took = time.time() - t0
         how = ("ended normally" if rc == 0 else f"was killed by signal {-rc} (crash)" if rc is not None and rc < 0
                else f"exited with code {rc}" if rc is not None else "did not start")
-        (log.info if rc == 0 else log.warning)("RetroArch %s after %d min %02d s (log: %s)", how, took // 60, took % 60, ralog)
+        (log.info if rc == 0 else log.warning)("%s %s after %d min %02d s (log: %s)", who, how, took // 60, took % 60, ralog)
         if rc:                                                       # keep the clues next to the event
             try:
                 errs = [ln.rstrip() for ln in open(ralog, errors="replace") if "[ERROR]" in ln or "[WARN]" in ln]
-                for ln in errs[-15:]: log.warning("  retroarch: %s", ln)
+                for ln in errs[-15:]: log.warning("  %s: %s", kind, ln)
             except Exception: pass
-        pygame.display.init(); self.open_display(); self.open_pads(); self.sfx.open()
+        if engine and rc == 0 and took >= 3:
+            try: self.lib.add_history(g)
+            except Exception as e: log.warning("Could not update Recently Played: %s", e)
+        pygame.display.init(); self.open_display(); self.rescan_pads(); self.sfx.open()
         self.img.cache.clear(); self.prev_bg = None
         pygame.event.clear(); self.hold.clear()
         sid, gid = self.sys["id"], self.cur_gi()
         self.lib.refresh_specials()
         self.si = next((i for i, s in enumerate(self.lib.systems) if s["id"] == sid), 0); self.gi[sid] = gid
-        if took < 3: self.err("The game closed straight away - it may need a different core")
+        quit_by_user = False
+        if engine:
+            try: quit_by_user = "Quit chosen from the game menu" in open(ralog, errors="replace").read()
+            except OSError: pass
+        if took < 3 and not quit_by_user: self.err("The game closed straight away - it may need a different core")
 
     # -- input handling with key repeat
     REPEAT_FIRST, REPEAT = 0.32, 0.075
@@ -792,10 +996,12 @@ class App:
         if act in ("left", "right", "up", "down"):
             d = -1 if act in ("left", "up") else 1
             if self.screen_mode == "games" and act in ("up", "down"): d *= 10
+            if self.screen_mode == "versions" and act in ("left", "right"): return
             if self.move(d): self.sfx.play("system" if self.screen_mode == "systems" else "move")
         elif act == "a": self.accept()
         elif act == "b": self.back()
         elif act == "y": self.favorite()
+        elif act == "x": self.open_versions()
         elif act == "lb": self.jump_letter(-1)
         elif act == "rb": self.jump_letter(1)
 
@@ -808,15 +1014,16 @@ class App:
     def handle(self, e):
         K = {pygame.K_LEFT: "left", pygame.K_RIGHT: "right", pygame.K_UP: "up", pygame.K_DOWN: "down",
              pygame.K_RETURN: "a", pygame.K_KP_ENTER: "a", pygame.K_BACKSPACE: "b", pygame.K_ESCAPE: "b",
-             pygame.K_f: "y", pygame.K_PAGEUP: "lb", pygame.K_PAGEDOWN: "rb"}
+             pygame.K_f: "y", pygame.K_v: "x", pygame.K_PAGEUP: "lb", pygame.K_PAGEDOWN: "rb"}
         B = {pygame.CONTROLLER_BUTTON_DPAD_LEFT: "left", pygame.CONTROLLER_BUTTON_DPAD_RIGHT: "right",
              pygame.CONTROLLER_BUTTON_DPAD_UP: "up", pygame.CONTROLLER_BUTTON_DPAD_DOWN: "down",
              pygame.CONTROLLER_BUTTON_A: "a", pygame.CONTROLLER_BUTTON_B: "b", pygame.CONTROLLER_BUTTON_Y: "y",
+             pygame.CONTROLLER_BUTTON_X: "x",
              pygame.CONTROLLER_BUTTON_LEFTSHOULDER: "lb", pygame.CONTROLLER_BUTTON_RIGHTSHOULDER: "rb",
              pygame.CONTROLLER_BUTTON_START: "a", pygame.CONTROLLER_BUTTON_BACK: "b"}
         JOY = (pygame.JOYBUTTONDOWN, pygame.JOYBUTTONUP, pygame.JOYHATMOTION, pygame.JOYAXISMOTION)
         jid = getattr(e, "instance_id", None)
-        if e.type == pygame.JOYDEVICEADDED: self.open_pads()
+        if e.type == pygame.JOYDEVICEADDED: self.pad_plugged()
         elif e.type == pygame.JOYDEVICEREMOVED and jid in self.raw:
             if self.setup and self.setup["iid"] == jid: self.cancel_setup()
             for d in (self.raw, self.raw_map, self.pad_style, self.pad_quit): d.pop(jid, None)
@@ -846,15 +1053,16 @@ class App:
             if self.pad_style.get(getattr(e, "instance_id", None)) == "snes":
                 # SDL maps replicas by position: its "A" is the bottom button, printed B. Follow the printed
                 # labels like a real Nintendo pad: right (printed A) plays, bottom (B) goes back, left (Y) favorites.
-                Bs = dict(B); Bs.pop(pygame.CONTROLLER_BUTTON_Y)
-                Bs.update({pygame.CONTROLLER_BUTTON_A: "b", pygame.CONTROLLER_BUTTON_B: "a", pygame.CONTROLLER_BUTTON_X: "y"})
+                Bs = dict(B)
+                Bs.update({pygame.CONTROLLER_BUTTON_A: "b", pygame.CONTROLLER_BUTTON_B: "a", pygame.CONTROLLER_BUTTON_X: "y",
+                           pygame.CONTROLLER_BUTTON_Y: "x"})
             else: Bs = B
             if e.button in Bs: self.set_hold(Bs[e.button], e.type == pygame.CONTROLLERBUTTONDOWN)
         elif e.type == pygame.CONTROLLERAXISMOTION and e.axis in (pygame.CONTROLLER_AXIS_LEFTX, pygame.CONTROLLER_AXIS_LEFTY):
             neg, pos = ("left", "right") if e.axis == pygame.CONTROLLER_AXIS_LEFTX else ("up", "down")
             v = e.value / 32767
             self.set_hold(neg, v < -0.55); self.set_hold(pos, v > 0.55)
-        elif e.type == pygame.CONTROLLERDEVICEADDED: self.open_pads()
+        elif e.type == pygame.CONTROLLERDEVICEADDED: self.pad_plugged()
         elif e.type == pygame.CONTROLLERDEVICEREMOVED:
             self.pads = {}; self.pad_style = {}; self.pad_quit = {}; self.open_pads()
             if self.style != "keyboard": self.cur_pad, self.style = next(iter(self.pad_style.items()), (None, "keyboard"))
@@ -921,6 +1129,8 @@ class App:
                     pygame.draw.circle(s, color, (cx, cy), 9, 4)
                 elif label == "triangle":
                     pygame.draw.polygon(s, color, [(cx, cy - 10), (cx + 10, cy + 8), (cx - 10, cy + 8)], 4)
+                elif label == "square":
+                    pygame.draw.rect(s, color, (cx - 8, cy - 8, 16, 16), 4)
             return x + 52
         f = self.fonts(22, True)                                   # pills (shoulder buttons) and keyboard keys
         for part in label.split():
@@ -985,7 +1195,7 @@ class App:
         text(self.screen, self.fonts(30), s["maker"] if s["special"] else f"{len(s['games']):,} games", (W / 2, 850), (210, 215, 228), anchor="midtop")
         if hints: self.draw_hints([("a", "Open"), ("b", "Power")])
 
-    def draw_games(self):
+    def draw_games(self, hints=True):
         s = self.sys; gs = self.games(); i = self.cur_gi(); g = gs[i] if gs else None
         self.draw_background(s["color"], g)
         self.draw_header(s["name"], f"{len(gs):,} games  ·  {i + 1:,} / {len(gs):,}")
@@ -1011,7 +1221,7 @@ class App:
             self.screen.blit(im, r)
             if ad <= 0.5:
                 rrect(self.screen, (255, 255, 255), r.inflate(12, 12), 14, 5)
-                if gs[j].path in self.lib.fav_paths:
+                if self.lib.is_fav(gs[j]):
                     star(self.screen, (r.right - 30, r.top + 32), 26)
         self.screen.set_clip(None)
         # title-screen side panel
@@ -1041,17 +1251,49 @@ class App:
             if info: text(self.screen, self.fonts(28), "  ·  ".join(info), (cx, 846), (205, 210, 225), anchor="midtop", maxw=1250)
             if not g.core:
                 text(self.screen, self.fonts(24), "No core assigned", (cx, 892), (240, 150, 120), anchor="midtop")
+            elif g.versions:                                        # "3 versions · (X) to choose", with this pad's own X button
+                f1, f2 = self.fonts(26, True), self.fonts(26)
+                a, b = f"{len(g.versions)} versions  ·  ", "  to choose"
+                bw = self.draw_button("x", 0, 0, draw=False)
+                x0 = cx - (f1.size(a)[0] + bw + f2.size(b)[0]) / 2
+                text(self.screen, f1, a, (x0, 908), (150, 200, 255), anchor="midleft")
+                x1 = self.draw_button("x", x0 + f1.size(a)[0], 908)
+                text(self.screen, f2, b, (x1 - 10, 908), (190, 205, 230), anchor="midleft")
         else:
             text(self.screen, self.fonts(40), "No games here", (W / 2, H / 2), anchor="center")
         if self.jump and time.time() < self.jump[1]:
             box = pygame.Surface((220, 220), pygame.SRCALPHA); rrect(box, (0, 0, 0, 190), box.get_rect(), 30)
             self.screen.blit(box, (cx - 110, cy - 110))
             text(self.screen, self.fonts(150, True), self.jump[0], (cx, cy), anchor="center")
-        self.draw_hints([("a", "Play"), ("b", "Back"), ("y", "Favorite"), ("lbrb", "Jump A–Z")])
+        if not hints: return
+        hs = [("a", "Play"), ("b", "Back"), ("y", "Favorite")]
+        if g and g.versions: hs.append(("x", "Versions"))
+        self.draw_hints(hs + [("lbrb", "Jump A–Z")])
+
+    def draw_versions(self):
+        self.draw_games(hints=False)
+        dim = pygame.Surface((W, H), pygame.SRCALPHA); dim.fill((0, 0, 0, 175)); self.screen.blit(dim, (0, 0))
+        vs = self.vlist; show = 7; top = max(0, min(self.vsel - show // 2, len(vs) - show))
+        box = pygame.Rect(0, 0, 1180, 190 + 84 * min(show, len(vs))); box.center = (W / 2, H / 2 - 20)
+        rrect(self.screen, (28, 30, 42), box, 28); rrect(self.screen, (90, 95, 115), box, 28, 3)
+        text(self.screen, self.fonts(40, True), vs[0].title, (W / 2, box.top + 34), anchor="midtop", maxw=1080)
+        text(self.screen, self.fonts(26), f"{len(vs)} versions", (W / 2, box.top + 88), (170, 175, 190), anchor="midtop")
+        for row, k in enumerate(range(top, min(len(vs), top + show))):
+            r = pygame.Rect(0, 0, 1080, 70); r.midtop = (W / 2, box.top + 140 + row * 84)
+            on = k == self.vsel
+            rrect(self.screen, (230, 232, 240) if on else (55, 58, 75), r, 18)
+            folder = os.path.basename(os.path.dirname(split_archive(vs[k].path)[0]))
+            text(self.screen, self.fonts(28, True), vs[k].label, (r.left + 28, r.centery), (20, 22, 30) if on else (230, 232, 240),
+                 anchor="midleft", shadow=False, maxw=760)
+            text(self.screen, self.fonts(22), folder, (r.right - 24, r.centery), (90, 95, 110) if on else (150, 155, 170),
+                 anchor="midright", shadow=False, maxw=260)
+        self.draw_hints([("a", "Play"), ("b", "Back")])
 
     @property
     def POWER_MENU(self):
-        return ("Resume", f"Sound: {'On' if self.sfx.enabled else 'Off'}", "Set up controller", "Exit Insert Coin")
+        return ("Resume", f"Sound: {'On' if self.sfx.enabled else 'Off'}",
+                f"Player: {'Built-in (beta)' if self.settings.get('engine') else 'RetroArch'}",
+                f"Games: {'One per game' if self.settings['one_per_game'] else 'Show all'}", "Set up controller", "Exit Insert Coin")
 
     def draw_quit(self):
         self.draw_systems(hints=False)
@@ -1094,12 +1336,12 @@ class App:
         text(self.screen, self.fonts(26), "Buttons, the d-pad and sticks all work.   Esc on the keyboard cancels.",
              (W / 2, H - 70), (170, 175, 190), anchor="midtop")
 
-    def splash(self, g):
+    def splash(self, g, engine=False):
         self.screen.fill((0, 0, 0))
         im = self.img.get(g.thumb("Named_Boxarts"), 420, 520)
         if im: self.screen.blit(im, im.get_rect(center=(W / 2, H / 2 - 60)))
         text(self.screen, self.fonts(44, True), g.title, (W / 2, H / 2 + 250), anchor="midtop", maxw=1500)
-        text(self.screen, self.fonts(26), f"Starting…   ({self.pad_quit.get(self.cur_pad, QUIT_COMBO[self.style]) if self.style != 'keyboard' else 'Esc'} quits the game)", (W / 2, H / 2 + 320), (180, 185, 200), anchor="midtop")
+        text(self.screen, self.fonts(26), f"Starting…   ({self.pad_quit.get(self.cur_pad, QUIT_COMBO[self.style]) if self.style != 'keyboard' else 'Esc'} opens the game menu)", (W / 2, H / 2 + 320), (180, 185, 200), anchor="midtop")
         pygame.display.flip()
 
     def draw_empty(self):
@@ -1119,10 +1361,11 @@ class App:
             return self.draw_setup()
         if not self.lib.systems:
             return self.draw_empty()
-        {"systems": self.draw_systems, "games": self.draw_games, "quit": self.draw_quit}[self.screen_mode]()
+        {"systems": self.draw_systems, "games": self.draw_games, "quit": self.draw_quit,
+         "versions": self.draw_versions}[self.screen_mode]()
         if self.toast and time.time() < self.toast[1]:
             f = self.fonts(30); w = f.size(self.toast[0])[0] + 60
-            r = pygame.Rect(0, 0, w, 64); r.midtop = (W / 2, 150)
+            r = pygame.Rect(0, 0, w, 64); r.midtop = (W / 2, H - 150 if self.screen_mode == "quit" else 150)   # clear of the menu
             box = pygame.Surface(r.size, pygame.SRCALPHA); rrect(box, (0, 0, 0, 200), box.get_rect(), 32); self.screen.blit(box, r)
             text(self.screen, f, self.toast[0], r.center, anchor="center", shadow=False)
 

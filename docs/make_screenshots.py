@@ -36,6 +36,8 @@ SYSTEMS = {
 LIBRARY = {pl: v[3] for pl, v in SYSTEMS.items()}
 REGIONS = ["World", "USA", "Japan", "Europe"]
 FAVORITES = ["Ember Quest", "Neon Brawlers", "Chrome Horizon", "Coral Kingdom"]
+# extra copies of a game, to show the Versions list (a region, a fan translation, a revision)
+VERSIONS = {"Ember Quest": ["Japan", "Europe", "USA) (Rev 1", "Japan) (Translated En"]}
 RECENT = ["Star Pilot X", "Ember Quest", "Tiny Towers", "Rogue Comet", "Echo Protocol"]
 
 
@@ -110,6 +112,11 @@ def build_home(pygame, root):
                 pygame.image.save(img, os.path.join(ra, "thumbnails", sysdir, kind, label + ".png"))
             e = {"path": rom, "label": label, "core_path": core, "core_name": "Demo", "crc32": "00000000|crc", "db_name": pl + ".lpl"}
             entries.append(e); items[g] = e
+            for reg in VERSIONS.get(g, []):
+                vl = f"{g} ({reg})"; vrom = os.path.join(ra, "roms", vl.replace(" ", "_") + ".zip"); open(vrom, "w").close()
+                for kind, img in (("Named_Boxarts", box), ("Named_Snaps", snap), ("Named_Titles", title)):
+                    pygame.image.save(img, os.path.join(ra, "thumbnails", sysdir, kind, vl + ".png"))
+                entries.append(dict(e, path=vrom, label=vl))
         json.dump({"version": "1.5", "default_core_path": core, "items": entries}, open(os.path.join(ra, "playlists", pl + ".lpl"), "w"))
     json.dump({"version": "1.5", "items": [items[g] for g in FAVORITES]}, open(os.path.join(ra, "content_favorites.lpl"), "w"))
     json.dump({"version": "1.5", "items": [items[g] for g in RECENT]}, open(os.path.join(ra, "content_history.lpl"), "w"))
@@ -142,8 +149,20 @@ def main():
     go_system("Pixel Forge - 16-Bit Console"); app.screen_mode = "games"
     app.gi[app.sys["id"]] = next(k for k, g in enumerate(app.games()) if g.title == "Ember Quest")
     app.gpos = float(app.cur_gi()); save("games")
+    app.open_versions(); app.vsel = 1; save("versions"); app.screen_mode = "games"
     app.si = 0; app.spos = 0.0; app.screen_mode = "games"; app.gpos = 0.0; save("favorites")
     app.screen_mode = "systems"; go_system("Pixel Forge - 32-Bit Disc System"); app.screen_mode = "quit"; app.quit_sel = 1; save("menu")
+    # the built-in player's pause menu, over a demo game's picture
+    eng = runpy.run_path(os.path.join(HERE, "..", "engine.py"), run_name="engine_demo")
+    p = eng["Player"].__new__(eng["Player"]); p.screen = app.screen; p.menu_sel = 0
+    fp = pygame.font.match_font("ubuntu,notosans,dejavusans", bold=True); fc = {}
+    p.font = lambda n: fc.setdefault(n, pygame.font.Font(fp, n))
+    _, snap, _ = draw_art(pygame, lambda n: pygame.font.Font(fp, n), "Star Pilot X", root)
+    W, H = app.screen.get_size(); app.screen.fill((0, 0, 0))
+    g = pygame.transform.scale(snap, (H * 4 // 3, H)); app.screen.blit(g, ((W - g.get_width()) // 2, 0))
+    p.draw_menu()
+    pygame.image.save(pygame.transform.smoothscale(app.screen, SIZE), os.path.join(OUT, "game_menu.png"))
+    print("wrote", os.path.join("docs", "screenshots", "game_menu.png"))
     app.raw[1] = None
     app.start_setup(1, name="USB Gamepad", guid="demo", baseline={})
     app.setup["step"] = 4; save("controller_setup")
