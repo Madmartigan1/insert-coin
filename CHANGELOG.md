@@ -4,7 +4,7 @@ All notable changes to Insert Coin. Versions follow [semantic versioning](https:
 before 1.0, minor versions add features and patch versions fix bugs.
 Each version is also a [GitHub Release](https://github.com/Madmartigan1/insert-coin/releases).
 
-## [Unreleased]
+## [0.4.3] — 2026-11-04 · "Message received"
 
 ### Changed
 - **Controls** in the built-in player's pause menu is now offered for arcade and Neo Geo games
