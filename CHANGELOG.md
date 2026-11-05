@@ -4,6 +4,18 @@ All notable changes to Insert Coin. Versions follow [semantic versioning](https:
 before 1.0, minor versions add features and patch versions fix bugs.
 Each version is also a [GitHub Release](https://github.com/Madmartigan1/insert-coin/releases).
 
+## [Unreleased]
+
+### Changed
+- **Controls** in the built-in player's pause menu is now offered for arcade and Neo Geo games
+  only. Home-console games have their own button settings in their menus, so their pause menu is
+  back to **Resume / Quit game**.
+
+### Fixed
+- **Messages from the emulator now appear on screen** in the built-in player, as they do in
+  RetroArch. Without them there was no way to know that **LT** had switched the PC Engine pad
+  to 6-button mode, in which some older games can't walk left or right.
+
 ## [0.4.2] — 2026-11-04 · "Clean exit"
 
 ### Fixed
