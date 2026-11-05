@@ -392,7 +392,7 @@ from the libretro thumbnail project and remain subject to their owners' rights.
 
 ## License
 
-[MIT](LICENSE) © 2026 Madmartigan1
+[MIT](LICENSE) © 2026 Aleksandar Kamber
 
 Insert Coin uses [pygame-ce](https://github.com/pygame-community/pygame-ce), which is licensed
 under the LGPL 2.1, as an installed library. The built-in player talks to emulator cores through
