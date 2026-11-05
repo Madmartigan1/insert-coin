@@ -91,6 +91,10 @@ class InputDescriptor(C.Structure):
 class Message(C.Structure):
     _fields_ = [("msg", C.c_char_p), ("frames", C.c_uint)]
 
+class MessageExt(C.Structure):
+    _fields_ = [("msg", C.c_char_p), ("duration", C.c_uint), ("priority", C.c_uint), ("level", C.c_int),
+                ("target", C.c_int), ("type", C.c_int), ("progress", C.c_int8)]
+
 ENV_T = C.CFUNCTYPE(C.c_bool, C.c_uint, C.c_void_p)
 VIDEO_T = C.CFUNCTYPE(None, C.c_void_p, C.c_uint, C.c_uint, C.c_size_t)
 SAMPLE_T = C.CFUNCTYPE(None, C.c_int16, C.c_int16)
@@ -253,7 +257,7 @@ class Player:
             if cmd == 3: C.cast(data, C.POINTER(C.c_bool))[0] = True; return True      # GET_CAN_DUPE
             if cmd == 6:                                     # SET_MESSAGE
                 m = C.cast(data, C.POINTER(Message))[0]
-                if m.msg: log("INFO", "Core message: " + m.msg.decode(errors="replace"))
+                if m.msg: self.core_message(m.msg.decode(errors="replace"), m.frames / 60)
                 return True
             if cmd == 7: self.running = False; return True   # SHUTDOWN
             if cmd == 8: return True                         # SET_PERFORMANCE_LEVEL
@@ -307,9 +311,12 @@ class Player:
             if cmd == 50: C.cast(data, C.POINTER(C.c_float))[0] = 60.0; return True    # GET_TARGET_REFRESH_RATE
             if cmd == 51: return True                        # GET_INPUT_BITMASKS: yes
             if cmd == 61: C.cast(data, C.POINTER(C.c_uint))[0] = 4; return True        # GET_INPUT_MAX_USERS
-            if cmd == 60:                                    # SET_MESSAGE_EXT (msg is the first field)
-                p = C.cast(data, C.POINTER(C.c_char_p))[0]
-                if p: log("INFO", "Core message: " + p.decode(errors="replace"))
+            if cmd == 60:                                    # SET_MESSAGE_EXT
+                m = C.cast(data, C.POINTER(MessageExt))[0]
+                if m.msg:
+                    text = m.msg.decode(errors="replace")
+                    if m.target == 2: log("INFO", "Core message: " + text)                 # "log only"
+                    else: self.core_message(text, m.duration / 1000)
                 return True
         except Exception as e:
             log("WARN", f"Environment call {cmd} failed: {e}")
@@ -444,6 +451,7 @@ class Player:
             th = H; tw = round(th * aspect)
             if tw > W: tw = W; th = round(W / aspect)
             self.screen.blit(pygame.transform.scale(img, (tw, th)), ((W - tw) // 2, (H - th) // 2))  # sharp pixels
+        self.draw_osd()
         if self.paused: self.draw_menu()
         pygame.display.flip()
 
@@ -545,7 +553,24 @@ class Player:
         return 0
 
     # -- main loop
-    MENU = ("Resume", "Controls", "Quit game")
+    @property
+    def MENU(self):
+        """Controls only for arcade games: home-console games have their own button settings in their menus."""
+        arcade = any(k in self.name for k in ("FinalBurn", "FB Alpha", "MAME"))
+        return ("Resume", "Controls", "Quit game") if arcade else ("Resume", "Quit game")
+
+    def core_message(self, text, seconds):
+        """Shown on screen the way RetroArch does (e.g. the PC Engine core's '6-button mode selected')."""
+        log("INFO", "Core message: " + text)
+        self.osd = (text, time.time() + max(2.0, min(6.0, seconds or 3.0)))
+
+    def draw_osd(self):
+        text, until = getattr(self, "osd", None) or ("", 0)
+        if time.time() > until: return
+        t = self.font(30).render(text[:90], True, (255, 255, 255))
+        r = t.get_rect(bottomleft=(48, H - 40)).inflate(36, 20)
+        box = pygame.Surface(r.size, pygame.SRCALPHA); box.fill((0, 0, 0, 170))
+        self.screen.blit(box, r); self.screen.blit(t, t.get_rect(center=r.center))
     WAIT_S = 5                                               # seconds to press a button before it gives up
 
     def pad_style(self, iid):
