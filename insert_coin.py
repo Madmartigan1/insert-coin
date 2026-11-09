@@ -388,6 +388,36 @@ def browser_command(exe, url, windowed=False):
             "--noerrdialogs"] + (["--window-size=1280,760", f"--app={url}"] if windowed else ["--kiosk", "--start-fullscreen", url])
 
 
+def stale_browsers():
+    """Main processes of browsers running with Insert Coin's own profile. Chrome rewrites its command line into one
+    space-separated string, so match on the text rather than on separate arguments."""
+    prof = f"{APPDIR}/browser/"; pids = []
+    for d in os.listdir("/proc"):
+        if not d.isdigit() or int(d) == os.getpid(): continue
+        try:
+            with open(f"/proc/{d}/cmdline", "rb") as f: cmd = f.read().replace(b"\0", b" ").decode(errors="replace")
+        except OSError: continue
+        if (f"--user-data-dir={prof}" in cmd or f"--profile {prof}" in cmd) and "--type=" not in cmd:
+            pids.append(int(d))                                      # not its helper processes (--type=renderer, ...)
+    return pids
+
+
+def close_stale_browsers():
+    """Close any browser still running with Insert Coin's own profile (left open, or from a copy of Insert Coin that
+    was stopped): a new game would otherwise be handed to it, and the new browser would exit straight away."""
+    pids = stale_browsers()
+    for pid in pids:
+        log.info("Closing a browser left open (pid %d)", pid)
+        try: os.kill(pid, signal.SIGTERM)
+        except OSError: pass
+    t = time.time()
+    while pids and time.time() - t < 3:
+        pids = [p for p in pids if os.path.exists(f"/proc/{p}")]; time.sleep(0.1)
+    for pid in pids:
+        try: os.kill(pid, signal.SIGKILL)
+        except OSError: pass
+
+
 def sdl_controller_update():
     """SDL_GameControllerUpdate from the SDL library pygame uses: refreshes the controllers' button states while
     Insert Coin has no window (pygame's event functions need one). None if it can't be found."""
@@ -1261,6 +1291,7 @@ class App:
         try:
             server = serve_folder(g.folder, (g.start, g.title, g.buttons) if g.flash else None)
             url = f"http://127.0.0.1:{server.server_address[1]}/" + (FLASH_PAGE if g.flash else urllib.parse.quote(g.start))
+            close_stale_browsers()
             cmd = browser_command(br, url, self.windowed)
             log.info("Launch (browser, %s): %s | %s", os.path.basename(br), g.label, g.path)
             pygame.display.quit()
