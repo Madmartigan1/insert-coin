@@ -12,9 +12,8 @@ Each version is also a [GitHub Release](https://github.com/Madmartigan1/insert-c
   open full-screen in their own browser profile, served only to this computer, and
   **Select + Start** brings you back. Flash games play through Ruffle; the pad becomes the keyboard
   and mouse they expect (keys set per game), with the right stick moving a pointer for mouse-only
-  menus and A to click, as in Insert Coin's menus. With Chrome-family browsers these are genuine
-  key presses and clicks, so even screens that ignore anything else ("press space to continue")
-  work from the pad. Favorites and Recently Played work for them too.
+  menus and A to click, as in Insert Coin's menus. The keyboard and mouse keep working alongside the
+  pad; a few Flash screens only react to the real keyboard. Favorites and Recently Played work for them too.
 
 ### Fixed
 - A list with a single game says "1 game", not "1 games".

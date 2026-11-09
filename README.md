@@ -218,11 +218,8 @@ so your normal browsing, tabs and windows are untouched.
   Many Flash menus are mouse-only: the **right stick moves a pointer**, and after you've moved it
   **A clicks** — the same button that selects in Insert Coin's menus (Cross on PlayStation, the
   right-hand A on Nintendo-style pads). After a click, or as soon as you press anything else, A is
-  the game's button again. With Chrome, Chromium or Brave, Insert Coin sends these as genuine key
-  presses and clicks through the browser's own debugging channel, over a private pipe (no network
-  port), to the game's page only — some Flash screens ignore anything less. With Firefox, the page
-  reads the pad itself, and a few such screens may need the keyboard. The mouse and keyboard work
-  as well.
+  the game's button again. The keyboard and mouse work as well, and a few Flash screens only react
+  to the real keyboard (see Troubleshooting).
 - **Favorites and Recently Played** work as for any other game. Insert Coin keeps them for these
   games itself, in `~/.config/insert-coin/played.json`, since RetroArch can't open them.
 

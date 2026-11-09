@@ -470,6 +470,11 @@ def close_stale_browsers():
         except OSError: pass
 
 
+# Off: with it, the physical keyboard stopped working on some Flash screens (user test, 2026-11-09), and it still
+# couldn't get the pad past one game's "press space to continue". The page reads the pad instead (flash_page).
+FLASH_DEVTOOLS_INPUT = False
+
+
 class PageInput:
     """Genuine keyboard and mouse input for one browser page, through Chrome's DevTools protocol over a private pipe
     (--remote-debugging-pipe: no network port, nothing else can connect). Some Flash screens only answer real, held
@@ -1547,7 +1552,8 @@ class App:
         server = rc = None; quit_by_user = False; t0 = time.time()
         try:
             flashpad = None                                         # Chrome-family browsers: genuine input via DevTools
-            if g.flash and "firefox" not in os.path.basename(br): flashpad = FlashPad(PageInput(), g.buttons)
+            if FLASH_DEVTOOLS_INPUT and g.flash and "firefox" not in os.path.basename(br):
+                flashpad = FlashPad(PageInput(), g.buttons)
             server = serve_folder(g.folder, (g.start, g.title, g.buttons, flashpad is not None) if g.flash else None)
             url = f"http://127.0.0.1:{server.server_address[1]}/" + (FLASH_PAGE if g.flash else urllib.parse.quote(g.start))
             close_stale_browsers()
