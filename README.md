@@ -5,7 +5,7 @@
 Pick a system, scroll through the box art, press **A** to play. No keyboard, no settings menus —
 just your games, the way a console shows them.
 
-> **Status: 0.4.3 — early release.** Tested on Linux Mint 22.3 (Cinnamon, X11) with Xbox-style and
+> **Status: 0.4.4 — early release.** Tested on Linux Mint 22.3 (Cinnamon, X11) with Xbox-style and
 > PlayStation controllers. It hasn't been tried on other
 > setups yet, so expect rough edges and please [report them](CONTRIBUTING.md).
 >
@@ -24,6 +24,7 @@ just your games, the way a console shows them.
 - [Screenshots](#screenshots)
 - [Controls](#controls)
 - [Built-in player (beta)](#built-in-player-beta)
+- [Browser and Flash games](#browser-and-flash-games)
 - [Prerequisites](#prerequisites)
 - [Installation](#installation)
 - [Getting artwork](#getting-artwork-sync_thumbnailspy)
@@ -199,6 +200,83 @@ screen → **Player: Built-in (beta)**; switch back to **Player: RetroArch** at 
 - **Not there yet:** save states, rewind, fast-forward, shaders, changing core options, swapping
   discs in multi-disc games, and N64. Use **Player: RetroArch** for those.
 
+## Browser and Flash games
+
+Games that run in a web browser — your own HTML5 games, or old Flash (`.swf`) games — can have
+their own playlists in Insert Coin, next to the consoles. Pick one and it opens full-screen in
+Google Chrome (or Chromium, Brave, Firefox), served from a small web server that only your own
+computer can reach. The browser uses its own profile in `~/.local/share/insert-coin/browser/`,
+so your normal browsing, tabs and windows are untouched.
+
+- **Quitting:** **Select + Start** (Back + Start, Share + Options…) closes the game and brings you
+  back to Insert Coin. There's no pause menu here — Insert Coin can't draw over the browser — so
+  use the game's own pause. On the keyboard, **Alt + F4**.
+- **Controllers:** HTML5 games read the pad themselves (the browser's Gamepad API).
+- **Flash games** play through [Ruffle](https://ruffle.rs), a free Flash player. Flash games only
+  know the keyboard and mouse, so Insert Coin turns the pad into both: the D-pad and left stick
+  are the arrow keys, and each button presses the key(s) set for that game (`buttons`, below).
+  Many Flash menus are mouse-only: the **right stick moves a pointer**, and after you've moved it
+  **A clicks** — the same button that selects in Insert Coin's menus (Cross on PlayStation, the
+  right-hand A on Nintendo-style pads). After a click, or as soon as you press anything else, A is
+  the game's button again. The keyboard and mouse work as well, and a few Flash screens only react
+  to the real keyboard (see Troubleshooting).
+- **Favorites and Recently Played** work as for any other game. Insert Coin keeps them for these
+  games itself, in `~/.config/insert-coin/played.json`, since RetroArch can't open them.
+
+**Setting up.** List the games in `~/.config/insert-coin/browser_games.json`; each playlist
+appears on the home screen after the consoles:
+
+```json
+{
+  "playlists": [
+    {
+      "name": "My Games",
+      "maker": "Made at home",
+      "color": [230, 90, 60],
+      "games": [
+        {
+          "title": "Star Pilot",
+          "folder": "~/Games/star-pilot",
+          "start": "index.html",
+          "boxart": "docs/cover.png",
+          "title_screen": "docs/title.png",
+          "snap": "docs/level-1.png",
+          "year": "2026",
+          "publisher": "Me"
+        }
+      ]
+    },
+    {
+      "name": "Classic Web",
+      "maker": "Flash classics",
+      "games": [
+        {
+          "title": "Pixel Knights",
+          "folder": "~/Games/flash",
+          "start": "pixel_knights.swf",
+          "boxart": "pixel_knights.png",
+          "buttons": {"south": "X+Space", "east": "C", "west": "Z", "start": "Space"}
+        }
+      ]
+    }
+  ]
+}
+```
+
+- `folder` is served as the web site's root, and `start` is the page (or `.swf`) to open.
+- Images are relative to the game's folder, or full paths. Any one of them fills in for the others.
+  `year`, `publisher` and `color` are optional.
+- `buttons` (Flash only) sets which key each pad button presses. Buttons: `south` (A / Cross),
+  `east` (B / Circle), `west` (X / Square), `north` (Y / Triangle), `left-trigger` / `right-trigger`
+  (LB / RB), `select`, `start`, `dpad-up` / `-down` / `-left` / `-right`. Keys: `Up`, `Down`,
+  `Left`, `Right`, `Space`, `Enter`, `Shift`, `Ctrl`, `Alt`, `Tab`, `Escape`, `Backspace`, `A`–`Z`,
+  `0`–`9`; join keys with `+` to press several at once (`"X+Space"`: punch, and "press space to
+  continue"). Without it: A = Space, B = Enter, X = Z, Y = X, Start = Enter.
+
+**Installing Ruffle** (only needed for Flash games): download `ruffle-…-web-selfhosted.zip` from
+[Ruffle's releases](https://github.com/ruffle-rs/ruffle/releases) and unpack it into
+`~/.local/share/insert-coin/ruffle/`, so that `ruffle.js` is directly inside that folder.
+
 ## Prerequisites
 
 | Requirement | Notes |
@@ -331,6 +409,7 @@ can overwrite each other's settings.
 | `~/.config/retroarch/thumbnails/` | Box art, snapshots, title screens |
 | `~/.config/retroarch/content_history.lpl` | Recently Played |
 | `~/.config/retroarch/database/rdb/*.rdb` | Year and publisher information |
+| `~/.config/insert-coin/browser_games.json` | Your browser and Flash game playlists (optional) |
 
 **Writes:**
 
@@ -343,6 +422,9 @@ can overwrite each other's settings.
 | `~/.config/insert-coin/controllers.json` | Button set-ups for controllers that aren't recognised automatically |
 | `~/.config/insert-coin/remaps/` | Button layouts you chose for single games in the built-in player (**Controls**) |
 | `~/.config/insert-coin/settings.json` | Your settings: menu sounds, which player, one entry per game or show all |
+| `~/.config/insert-coin/played.json` | Favorites and Recently Played for browser games, and the time of each game launch (to place them in Recently Played) |
+| `~/.local/share/insert-coin/browser/` | The browser profile browser games run in |
+| `~/.local/state/insert-coin/browser-last.log` | The browser's output for the last browser game (`browser-previous.log`: the one before) |
 | `~/.local/state/insert-coin/insert-coin.log` | A log of start-ups, game launches and how each one ended, and any errors (kept to about 1 MB) |
 | `~/.local/state/insert-coin/retroarch-last.log` | RetroArch's detailed log of the last game played (`retroarch-previous.log`: the one before) |
 | `~/.local/state/insert-coin/engine-last.log` | The built-in player's log of the last game it played (`engine-previous.log`: the one before) |
@@ -370,6 +452,9 @@ also runs in a window, and that is not saved.
 | **Something crashed or closed unexpectedly** | Look at `~/.local/state/insert-coin/insert-coin.log` — it records each launch and how the game ended — and at `retroarch-last.log` or `engine-last.log` next to it for the game's details. Attach both when [reporting a problem](CONTRIBUTING.md). |
 | **No menu sounds** | Check **B** on the home screen shows **Sound: On**, and that your system volume is up. Without a working audio device Insert Coin simply runs silently. Game sound is handled separately and isn't affected. |
 | **Sticks feel swapped in an N64 shooter** | Many N64 shooters walk with the C-buttons and aim with the stick, and RetroArch puts the C-buttons on your right stick. In the game, open RetroArch's menu (**Select + Start**) → *Controls → Port 1 Controls*, swap the Left and Right Analog entries, then *Manage Remap Files → Save Game Remap File*. It applies to that game only. |
+| **A browser game has no sound, or ignores the pad** | Press a button on the pad once the game shows: browsers only report a controller after it's used on the page. If a Flash game doesn't respond to a button, set it in `buttons` (see [Browser and Flash games](#browser-and-flash-games)). |
+| **A Flash screen ignores the pad** | A few Flash screens only react to a real key held on the keyboard (for example a "Press space bar to continue" that checks the key at one moment). Use the keyboard there; it always works alongside the pad. |
+| **"Flash games need Ruffle"** | Install Ruffle as described in [Browser and Flash games](#browser-and-flash-games). |
 | **Stutters while scrolling the first time** | Artwork loads in the background on first view, then stays cached for the session. |
 
 ## Uninstall

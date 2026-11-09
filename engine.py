@@ -721,6 +721,7 @@ class Player:
                 if self.audio:                               # run the core just fast enough to keep the sound fed
                     while self.running and self.audio.queued() < self.audio.target and ran < 4:
                         self.lib.retro_run(); ran += 1
+                        if self.frames_left is not None and frames + ran >= self.frames_left: break   # --frames: exact
                 else:
                     self.lib.retro_run(); ran = 1
                 frames += ran

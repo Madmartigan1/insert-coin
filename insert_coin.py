@@ -15,13 +15,15 @@ Controls (Xbox-style pad; keyboard in brackets)
   LB / RB             previous / next letter   [PageUp / PageDown]
   Menu sounds can be switched off in the B menu (saved in ~/.config/insert-coin/settings.json).
   In a game: Select+Start opens the game menu (Resume / Quit game, or RetroArch's Quick Menu).
+  Browser and Flash games (~/.config/insert-coin/browser_games.json): Select+Start returns here.
 
 Options: --windowed   run in a window (for testing)
          --shot DIR   render sample screens to PNG files and exit (no display needed)
 """
-__version__ = "0.4.3"
+__version__ = "0.4.4"
 
-import json, os, re, sys, time, random, threading, subprocess, collections, logging, faulthandler, platform
+import json, os, re, sys, time, random, threading, subprocess, collections, logging, faulthandler, platform, signal, shutil
+import ctypes, fcntl, functools, http.server, urllib.parse
 
 os.environ.setdefault("PYGAME_HIDE_SUPPORT_PROMPT", "1")
 import pygame
@@ -201,6 +203,493 @@ class Game:
         return f"{RA}/thumbnails/{thumb_system(self.db)}/{kind}/{sanitize(self.label)}.png"
 
 
+class WebGame(Game):
+    """A browser game: a folder with an HTML start page, listed in browser_games.json. Insert Coin serves the
+    folder on 127.0.0.1 and opens the page full-screen in a browser (see App.launch_browser)."""
+    __slots__ = ("folder", "start", "art", "info", "buttons")
+
+    def __init__(self, spec, playlist):
+        self.folder = os.path.expanduser(spec["folder"])
+        self.start = spec.get("start") or "index.html"
+        self.label = spec.get("title") or os.path.basename(self.folder.rstrip("/"))
+        self.path = os.path.join(self.folder, self.start)
+        self.core = None; self.db = playlist; self.system = playlist; self.versions = None
+        self.title = self.label; self.letter = letter_of(self.label); self.key = sort_key(self.label)
+        art = {k: os.path.join(self.folder, os.path.expanduser(spec[k])) for k in ("boxart", "title_screen", "snap") if spec.get(k)}
+        first = next(iter(art.values()), "")
+        self.art = {"Named_Boxarts": art.get("boxart", first), "Named_Titles": art.get("title_screen", first),
+                    "Named_Snaps": art.get("snap", first)}
+        self.info = [str(spec.get("year") or ""), spec.get("publisher") or ""] if spec.get("year") or spec.get("publisher") else None
+        self.buttons = spec.get("buttons") or {}                    # Flash games: pad button -> key
+
+    @property
+    def flash(self): return self.start.lower().endswith(".swf")
+
+    def thumb(self, kind):
+        return self.art.get(kind, "")
+
+
+def load_web_playlists():
+    """browser_games.json in the config folder: {"playlists": [{"name", "maker", "color", "games": [{"title",
+    "folder", "start", "boxart", "title_screen", "snap", "year", "publisher"}]}]}. Image paths are relative to the
+    game's folder (or absolute). Games whose folder or start page is missing are skipped."""
+    try:
+        with open(f"{CONFDIR}/browser_games.json", encoding="utf-8") as f: d = json.load(f)
+    except FileNotFoundError: return []
+    except Exception as e: log.warning("browser_games.json could not be read: %s", e); return []
+    out = []
+    for p in d.get("playlists", []):
+        name = p.get("name") or "Browser games"
+        games = []
+        for spec in p.get("games", []):
+            try:
+                g = WebGame(spec, name)
+                if os.path.isfile(g.path): games.append(g)
+                else: log.warning("Browser game not found: %s", g.path)
+            except Exception as e: log.warning("Browser game skipped (%s): %s", e, spec)
+        if games:
+            col = tuple(p.get("color") or (230, 90, 60))[:3]
+            out.append({"id": "web:" + name, "name": name, "maker": p.get("maker") or "Browser games", "color": col,
+                        "games": sorted(games, key=lambda g: g.key), "special": None})
+    return out
+
+
+# ---------------------------------------------------------------- browser games: local server, browser, pad watch
+RUFFLE = f"{APPDIR}/ruffle"                                         # Ruffle's self-hosted web build: plays Flash (.swf)
+FLASH_PAGE = "__insert_coin_flash__.html"
+# Flash games only know the keyboard: pad button -> key(s) it presses (Ruffle's names; overridable per game with
+# "buttons"; "X+Space" presses both)
+FLASH_BUTTONS = {"dpad-up": "Up", "dpad-down": "Down", "dpad-left": "Left", "dpad-right": "Right",
+                 "south": "Space", "east": "Enter", "west": "Z", "north": "X", "start": "Enter"}
+PAD_INDEX = {"south": 0, "east": 1, "west": 2, "north": 3, "left-trigger": 4, "right-trigger": 5, "select": 8, "start": 9,
+             "dpad-up": 12, "dpad-down": 13, "dpad-left": 14, "dpad-right": 15}      # the browser's standard layout
+KEYCODES = {"Up": 38, "Down": 40, "Left": 37, "Right": 39, "Space": 32, "Enter": 13, "Shift": 16, "Ctrl": 17,
+            "Alt": 18, "Tab": 9, "Escape": 27, "Backspace": 8, **{c: ord(c) for c in "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"}}
+KEYNAMES = {"Up": ("ArrowUp", "ArrowUp"), "Down": ("ArrowDown", "ArrowDown"), "Left": ("ArrowLeft", "ArrowLeft"),
+            "Right": ("ArrowRight", "ArrowRight"), "Space": (" ", "Space"), "Enter": ("Enter", "Enter"),
+            "Shift": ("Shift", "ShiftLeft"), "Ctrl": ("Control", "ControlLeft"), "Alt": ("Alt", "AltLeft"),
+            "Tab": ("Tab", "Tab"), "Escape": ("Escape", "Escape"), "Backspace": ("Backspace", "Backspace"),
+            **{c: (c.lower(), "Key" + c) for c in "ABCDEFGHIJKLMNOPQRSTUVWXYZ"}, **{c: (c, "Digit" + c) for c in "0123456789"}}
+
+
+def flash_page(swf, title, buttons=None, native=False):
+    """A full-screen page that plays one .swf with Ruffle, the pad's buttons pressing the keys the game uses.
+
+    Ruffle presses the keys for most buttons itself. The page handles the pad's select button (A on Xbox pads, Cross
+    on PlayStation, the right-hand A on Nintendo-style pads, as in Insert Coin's menus) and any button set to several
+    keys: many Flash menus are mouse-only, so the right stick moves a pointer and, while it shows, that button
+    clicks; otherwise it presses its keys. Any other button hides the pointer at once, so it never gets in the way.
+    native=True: Insert Coin sends real keys and mouse input itself (FlashPad), so the page leaves the pad alone."""
+    keys = lambda v: [k for k in str(v).split("+") if k in KEYCODES]
+    mapping = {b: keys(v) for b, v in {**FLASH_BUTTONS, **(buttons or {})}.items() if b in PAD_INDEX}
+    ev = lambda k: {"key": KEYNAMES[k][0], "code": KEYNAMES[k][1], "keyCode": KEYCODES[k]}
+    page = {name: [ev(k) for k in ks] for name, ks in mapping.items()}      # all buttons, for the page's own handling
+    cfg = {"autoplay": "on", "unmuteOverlay": "hidden", "splashScreen": False, "letterbox": "on", "contextMenu": "off",
+           "showSwfDownload": False}
+    esc = lambda x: x.replace("&", "&amp;").replace("<", "&lt;")
+    return f"""<!doctype html><meta charset="utf-8"><title>{esc(title)}</title>
+<style>html,body{{margin:0;height:100%;background:#000;overflow:hidden}}ruffle-player{{width:100vw;height:100vh;display:block}}
+#ptr{{position:fixed;left:0;top:0;width:0;height:0;pointer-events:none;z-index:9;display:none;
+border-left:11px solid transparent;border-right:11px solid transparent;border-bottom:26px solid #fff;
+margin-left:-11px;filter:drop-shadow(0 0 2px #000) drop-shadow(0 0 1px #000);transform-origin:50% 0;rotate:-30deg}}</style>
+<script>
+const MAP = {json.dumps(page)}, INDEX = {json.dumps(PAD_INDEX)}, NATIVE = {json.dumps(bool(native))};
+// The select button depends on the pad (as in Insert Coin's menus); the browser's layout is by position.
+const selectButton = id => /057e|nintendo|0583.{{0,12}}2060|snes/i.test(id) ? "east" : "south";
+const mineFor = id => {{ const m = new Set([selectButton(id)]);
+  for (const [b, ks] of Object.entries(MAP)) if (ks.length > 1) m.add(b); return m; }};
+// Ruffle presses the keys for the buttons the page doesn't handle; set once the first pad is seen.
+window.RufflePlayer = {{config: {json.dumps(cfg)}}};
+const ruffleMapping = id => {{ const out = {{}}, mine = mineFor(id); if (NATIVE) return out;
+  for (const [b, ks] of Object.entries(MAP)) if (!mine.has(b) && ks.length) out[b] = ks[0].keyCode; return out; }};
+</script>
+<script src="/__ruffle__/ruffle.js"></script>
+<div id="ptr"></div>
+<script>
+window.addEventListener("load", () => {{
+  const pads = () => [...(navigator.getGamepads ? navigator.getGamepads() : [])].filter(Boolean);
+  const ptr = document.getElementById("ptr");
+  let p = null;
+  const start = id => {{                         // the player, with Ruffle's button mapping for this pad
+    window.RufflePlayer.config.gamepadButtonMapping = ruffleMapping(id);
+    p = window.RufflePlayer.newest().createPlayer(); document.body.appendChild(p);
+    p.load({{url: {json.dumps(urllib.parse.quote(swf))}}}).then(() => p.focus());
+    p.focus(); window.addEventListener("click", () => p.focus());
+  }};
+  // (browsers only list a pad once it's been used on the page, so this is usually the standard layout: A / Cross)
+  start((pads()[0] || {{}}).id || "");
+  const target = () => (p && p.shadowRoot && p.shadowRoot.querySelector("canvas")) || p;
+  // Ruffle reads offsetX/Y, and Chrome works those out for page-made pointer events as if unscaled: at 2x display
+  // scaling a click would land at half the distance. Measure that per event and compensate, so any scaling works.
+  const scale = (c, r) => {{ let k = 1;
+    c.addEventListener("ic-measure", e => {{ if (e.offsetX > 0) k = 100 / e.offsetX; }}, {{once: true}});
+    c.dispatchEvent(new PointerEvent("ic-measure", {{clientX: r.left + 100, clientY: r.top + 100}})); return k; }};
+  const mouse = (type, buttons) => {{ const c = target(); if (!c) return;
+    const r = c.getBoundingClientRect(), k = scale(c, r);
+    c.dispatchEvent(new PointerEvent(type, {{bubbles: true, composed: true, clientX: r.left + (x - r.left) * k,
+        clientY: r.top + (y - r.top) * k, pointerId: 1, pointerType: "mouse", isPrimary: true, button: 0, buttons}})); }};
+  const key = (type, k) => p && p.dispatchEvent(new KeyboardEvent(type, {{key: k.key, code: k.code, keyCode: k.keyCode,
+      which: k.keyCode, bubbles: true, composed: true}}));
+  // armed: the pointer was moved since its last click, so the select button clicks; after a click it goes back to
+  // the game ("press space to continue" right after choosing a menu item) until the pointer is moved again.
+  let x = innerWidth / 2, y = innerHeight / 2, shown = -1e9, armed = false, prev = {{}}, held = {{}};
+  // native: Insert Coin moves the real mouse (DevTools input); the arrow just shows where it is
+  let nx = x, ny = y, nshown = -1e9;
+  if (NATIVE) for (const t of ["pointermove", "pointerdown"]) addEventListener(t, e => {{
+    nx = e.clientX; ny = e.clientY; nshown = performance.now(); }}, true);
+  (function tick() {{
+    const g = pads()[0];
+    if (g && p && !NATIVE) {{
+      const mine = mineFor(g.id), sel = selectButton(g.id), now = performance.now();
+      const ax = g.axes[2] || 0, ay = g.axes[3] || 0, dz = 0.2;
+      if (Math.abs(ax) > dz || Math.abs(ay) > dz) {{                // the right stick moves the pointer
+        const sp = 14 * Math.max(Math.abs(ax), Math.abs(ay));
+        x = Math.min(innerWidth - 1, Math.max(0, x + ax * sp)); y = Math.min(innerHeight - 1, Math.max(0, y + ay * sp));
+        shown = now; armed = true; mouse("pointermove", held.click ? 1 : 0);
+      }}
+      const on = i => !!(g.buttons[i] && (g.buttons[i].pressed || g.buttons[i].value > 0.5));
+      // pressing anything for the game (D-pad, other buttons) puts the pointer away straight away
+      for (const [b, i] of Object.entries(INDEX)) if (b !== sel && on(i) && !prev[i] && !mine.has(b)) {{ shown = -1e9; armed = false; }}
+      const pointing = armed && now - shown < 3000;
+      // RT / right-stick click always click; the select button clicks while the pointer shows
+      const clickNow = on(7) || on(11) || (on(INDEX[sel]) && (pointing || held.click === "sel"));
+      if (clickNow && !held.click) {{ held.click = on(INDEX[sel]) && pointing ? "sel" : "rt"; shown = now; armed = false; mouse("pointerdown", 1); p.focus(); }}
+      else if (!clickNow && held.click) {{ held.click = null; shown = now; mouse("pointerup", 0); }}
+      // the page's own buttons press their keys (when not clicking)
+      for (const b of mine) {{
+        const i = INDEX[b], down = on(i) && !(b === sel && held.click === "sel");
+        if (down && !held[b]) {{ held[b] = true; for (const k of MAP[b] || []) key("keydown", k); }}
+        else if (!down && held[b]) {{ held[b] = false; for (const k of MAP[b] || []) key("keyup", k); }}
+      }}
+      for (const i of Object.values(INDEX)) prev[i] = on(i);
+    }}
+    if (NATIVE) {{ x = nx; y = ny; shown = nshown; armed = true; }}
+    const vis = performance.now() - shown < 3000;
+    ptr.style.display = vis ? "block" : "none"; ptr.style.opacity = armed ? 1 : 0.45;
+    if (vis) ptr.style.translate = x + "px " + y + "px";
+    requestAnimationFrame(tick);
+  }})();
+}});
+</script>"""
+
+
+class QuietHandler(http.server.SimpleHTTPRequestHandler):
+    flash = None                                    # (swf, title, buttons, native) when serving a Flash game
+
+    def log_message(self, *a): pass
+
+    def end_headers(self):                                          # always the files on disk, never a stale copy
+        self.send_header("Cache-Control", "no-store"); super().end_headers()
+
+    def translate_path(self, path):
+        if path.startswith("/__ruffle__/"):                         # Ruffle's files, from Insert Coin's own folder
+            name = os.path.basename(urllib.parse.unquote(path.split("?")[0]))
+            return os.path.join(RUFFLE, name)
+        return super().translate_path(path)
+
+    def do_GET(self):
+        if self.flash and self.path.split("?")[0] == "/" + FLASH_PAGE:
+            body = flash_page(*self.flash).encode()
+            self.send_response(200); self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(body))); self.end_headers(); self.wfile.write(body); return
+        super().do_GET()
+
+
+QuietHandler.extensions_map = {**http.server.SimpleHTTPRequestHandler.extensions_map, ".wasm": "application/wasm",
+                               ".swf": "application/x-shockwave-flash", ".js": "text/javascript"}
+
+
+def serve_folder(folder, flash=None):
+    """Serve one game folder on 127.0.0.1 at a free port, in a background thread. Only this computer can reach it.
+    flash=(swf, title, buttons) also serves a page that plays that .swf with Ruffle."""
+    handler = type("Handler", (QuietHandler,), {"flash": flash})
+    srv = http.server.ThreadingHTTPServer(("127.0.0.1", 0), functools.partial(handler, directory=folder))
+    srv.daemon_threads = True
+    srv.handle_error = lambda *a: None                              # the browser hanging up mid-file is normal
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    return srv
+
+
+def find_browser():
+    for b in ("google-chrome", "google-chrome-stable", "chromium", "chromium-browser", "brave-browser", "firefox"):
+        p = shutil.which(b)
+        if p: return p
+    return None
+
+
+def browser_command(exe, url, windowed=False):
+    """Full-screen (kiosk) browser in its own profile, so the user's normal browser and its windows are untouched;
+    sound may start without a click first."""
+    prof = f"{APPDIR}/browser/" + ("firefox" if "firefox" in os.path.basename(exe) else "chrome")
+    os.makedirs(prof, exist_ok=True)
+    if "firefox" in os.path.basename(exe):
+        with open(f"{prof}/user.js", "w") as f:
+            for k, v in (("media.autoplay.default", "0"), ("browser.shell.checkDefaultBrowser", "false"),
+                         ("browser.sessionstore.resume_from_crash", "false"), ("datareporting.policy.dataSubmissionEnabled", "false"),
+                         ("browser.aboutwelcome.enabled", "false"), ("trailhead.firstrun.didSeeAboutWelcome", "true")):
+                f.write(f'user_pref("{k}", {v});\n')
+        return [exe, "--no-remote", "--profile", prof] + ([] if windowed else ["--kiosk"]) + [url]
+    try:                                                            # no "restore pages?" bubble after being closed
+        pf = f"{prof}/Default/Preferences"
+        with open(pf) as f: d = json.load(f)
+        d.setdefault("profile", {}).update(exit_type="Normal", exited_cleanly=True)
+        with open(pf, "w") as f: json.dump(d, f)
+    except Exception: pass
+    return [exe, f"--user-data-dir={prof}", "--no-first-run", "--no-default-browser-check", "--disable-session-crashed-bubble",
+            "--autoplay-policy=no-user-gesture-required", "--disable-features=Translate,MediaRouter", "--password-store=basic",
+            "--noerrdialogs"] + (["--window-size=1280,760", f"--app={url}"] if windowed else ["--kiosk", "--start-fullscreen", url])
+
+
+def stale_browsers():
+    """Main processes of browsers running with Insert Coin's own profile. Chrome rewrites its command line into one
+    space-separated string, so match on the text rather than on separate arguments."""
+    prof = f"{APPDIR}/browser/"; pids = []
+    for d in os.listdir("/proc"):
+        if not d.isdigit() or int(d) == os.getpid(): continue
+        try:
+            with open(f"/proc/{d}/cmdline", "rb") as f: cmd = f.read().replace(b"\0", b" ").decode(errors="replace")
+        except OSError: continue
+        if (f"--user-data-dir={prof}" in cmd or f"--profile {prof}" in cmd) and "--type=" not in cmd:
+            pids.append(int(d))                                      # not its helper processes (--type=renderer, ...)
+    return pids
+
+
+def close_stale_browsers():
+    """Close any browser still running with Insert Coin's own profile (left open, or from a copy of Insert Coin that
+    was stopped): a new game would otherwise be handed to it, and the new browser would exit straight away."""
+    pids = stale_browsers()
+    for pid in pids:
+        log.info("Closing a browser left open (pid %d)", pid)
+        try: os.kill(pid, signal.SIGTERM)
+        except OSError: pass
+    t = time.time()
+    while pids and time.time() - t < 3:
+        pids = [p for p in pids if os.path.exists(f"/proc/{p}")]; time.sleep(0.1)
+    for pid in pids:
+        try: os.kill(pid, signal.SIGKILL)
+        except OSError: pass
+
+
+# Off: with it, the physical keyboard stopped working on some Flash screens (user test, 2026-11-09), and it still
+# couldn't get the pad past one game's "press space to continue". The page reads the pad instead (flash_page).
+FLASH_DEVTOOLS_INPUT = False
+
+
+class PageInput:
+    """Genuine keyboard and mouse input for one browser page, through Chrome's DevTools protocol over a private pipe
+    (--remote-debugging-pipe: no network port, nothing else can connect). Some Flash screens only answer real, held
+    key presses, which neither a page script nor Ruffle's own gamepad support produce; these do, and they go to the
+    game's page only, never to another window."""
+    KEYS = {"Up": ("ArrowUp", "ArrowUp", 38), "Down": ("ArrowDown", "ArrowDown", 40), "Left": ("ArrowLeft", "ArrowLeft", 37),
+            "Right": ("ArrowRight", "ArrowRight", 39), "Space": (" ", "Space", 32), "Enter": ("Enter", "Enter", 13),
+            "Shift": ("Shift", "ShiftLeft", 16), "Ctrl": ("Control", "ControlLeft", 17), "Alt": ("Alt", "AltLeft", 18),
+            "Tab": ("Tab", "Tab", 9), "Escape": ("Escape", "Escape", 27), "Backspace": ("Backspace", "Backspace", 8),
+            **{c: (c.lower(), "Key" + c, ord(c)) for c in "ABCDEFGHIJKLMNOPQRSTUVWXYZ"},
+            **{c: (c, "Digit" + c, ord(c)) for c in "0123456789"}}
+    SYMS = KEYS                                                     # the key names FlashPad accepts
+
+    def __init__(self):
+        self.to_chrome = os.pipe(); self.from_chrome = os.pipe()     # Chrome reads fd 3, writes fd 4
+        self.out = os.fdopen(self.to_chrome[1], "wb", buffering=0)
+        self.n = 0; self.session = None; self.lock = threading.Lock(); self.replies = {}; self.cv = threading.Condition()
+        self.keys = set(); self.button = False; self.x = self.y = 0.0; self.w, self.h = 1280, 720; self.scale = 1.0
+        self.stats = {}                                             # key -> presses sent, and "click", for the log
+        self.started = False
+
+    def child_fds(self):
+        """Run in the browser process before it starts: put the pipe ends where Chrome expects them."""
+        r = fcntl.fcntl(self.to_chrome[0], fcntl.F_DUPFD, 10); w = fcntl.fcntl(self.from_chrome[1], fcntl.F_DUPFD, 10)
+        os.dup2(r, 3); os.dup2(w, 4)                                 # (via high numbers: either end may be 3 or 4)
+
+    def connected(self):
+        """After the browser started: our copies of its ends are closed, replies are read in the background."""
+        os.close(self.to_chrome[0]); os.close(self.from_chrome[1])
+        threading.Thread(target=self._reader, daemon=True).start()
+
+    def _reader(self):
+        buf = b""
+        with os.fdopen(self.from_chrome[0], "rb", buffering=0) as f:
+            while True:
+                chunk = f.read(65536)
+                if not chunk: break
+                buf += chunk
+                while b"\0" in buf:
+                    msg, buf = buf.split(b"\0", 1)
+                    try: m = json.loads(msg)
+                    except ValueError: continue
+                    if "id" in m:
+                        with self.cv:
+                            self.replies[m["id"]] = m; self.cv.notify_all()
+                            if len(self.replies) > 500:              # replies nobody waited for
+                                for k in sorted(self.replies)[:-50]: self.replies.pop(k, None)
+
+    def done(self, i):
+        with self.cv:
+            if i in self.replies: self.replies.pop(i); return True
+        return False
+
+    def send(self, method, wait=False, timeout=3.0, **params):
+        """Send a command; with wait, return its result. Returns the message id otherwise."""
+        with self.lock:
+            self.n += 1; i = self.n
+            msg = {"id": i, "method": method, "params": params}
+            if self.session and not method.startswith("Target."): msg["sessionId"] = self.session
+            try: self.out.write(json.dumps(msg).encode() + b"\0")
+            except OSError: return None
+        if not wait: return i
+        end = time.time() + timeout
+        with self.cv:
+            while i not in self.replies and time.time() < end: self.cv.wait(end - time.time())
+            return self.replies.pop(i, {}).get("result")
+
+    def attach(self):
+        """Find the game's page, attach to it, and wait for Ruffle to have loaded the game. True once ready (called
+        again until then)."""
+        if not self.session:
+            r = self.send("Target.getTargets", wait=True) or {}
+            page = next((t for t in r.get("targetInfos", []) if t.get("type") == "page"), None)
+            if not page: return False
+            r = self.send("Target.attachToTarget", wait=True, targetId=page["targetId"], flatten=True) or {}
+            self.session = r.get("sessionId")
+            if not self.session: return False
+        r = self.send("Runtime.evaluate", wait=True, returnByValue=True,
+                      expression="(() => { const p = document.querySelector('ruffle-player'); return !!p && p.readyState === 2; })()") or {}
+        if not (r.get("result") or {}).get("value") or not self.measure(): return False
+        # Ruffle takes the first click on a loaded game for itself (it doesn't reach the game), so make that click
+        # here, on the edge of the page, where the game is letterboxed and nothing can be hit.
+        for t in ("mousePressed", "mouseReleased"):
+            self.send("Input.dispatchMouseEvent", type=t, x=1, y=self.h // 2, button="left", buttons=1 if t == "mousePressed" else 0, clickCount=1)
+        return True
+
+    def measure(self):
+        r = self.send("Runtime.evaluate", wait=True, expression="[innerWidth, innerHeight]", returnByValue=True) or {}
+        v = (r.get("result") or {}).get("value")
+        if not v: return False
+        self.w, self.h = v; self.scale = max(0.5, self.h / 1080)
+        if not self.started: self.x, self.y = self.w / 2, self.h / 2
+        return True
+
+    def key(self, name, down):
+        if down: self.stats[name] = self.stats.get(name, 0) + 1
+        k, code, vk = self.KEYS[name]
+        p = dict(key=k, code=code, windowsVirtualKeyCode=vk, nativeVirtualKeyCode=vk)
+        if down:
+            self.send("Input.dispatchKeyEvent", type="rawKeyDown", **p)
+            if len(k) == 1: self.send("Input.dispatchKeyEvent", type="char", text=k, **p)
+            self.keys.add(name)
+        else:
+            self.send("Input.dispatchKeyEvent", type="keyUp", **p); self.keys.discard(name)
+
+    def centre(self): self.started = True
+
+    def move(self, dx, dy):
+        """Moves are coalesced: a new position goes out only once Chrome has handled the last one (it handles input
+        in turn, behind the game; 60 moves a second would queue up and delay clicks and keys)."""
+        self.x = min(self.w - 1, max(0, self.x + dx)); self.y = min(self.h - 1, max(0, self.y + dy))
+        self.moved = True; self.flush()
+
+    def flush(self):
+        if not getattr(self, "moved", False): return
+        if getattr(self, "move_id", None) and not self.done(self.move_id): return
+        self.moved = False
+        self.move_id = self.send("Input.dispatchMouseEvent", type="mouseMoved", x=self.x, y=self.y,
+                                 button="left" if self.button else "none", buttons=1 if self.button else 0)
+
+    def click(self, down):
+        if down: self.stats["click"] = self.stats.get("click", 0) + 1
+        if getattr(self, "moved", False):                           # the pointer's latest position first
+            self.moved = False; self.send("Input.dispatchMouseEvent", type="mouseMoved", x=self.x, y=self.y, button="none", buttons=0)
+        self.send("Input.dispatchMouseEvent", type="mousePressed" if down else "mouseReleased", x=self.x, y=self.y,
+                  button="left", buttons=1 if down else 0, clickCount=1)
+        self.button = down
+
+    def release_all(self):
+        for k in list(self.keys): self.key(k, False)
+        if self.button: self.click(False)
+
+    def close(self):
+        try: self.release_all(); self.out.close()
+        except Exception: pass
+
+
+class FlashPad:
+    """The pad as a keyboard and mouse for a Flash game (sent through PageInput). Buttons are named by position, as in
+    browser_games.json ("south" is A on an Xbox pad); the left stick also works as the D-pad. The right stick moves
+    the mouse pointer; once it has moved, the pad's select button (A / Cross / Nintendo's A, as in Insert Coin's
+    menus) clicks. After a click, or as soon as any other button is pressed, it is the game's button again."""
+    C = pygame
+    POS = {"south": C.CONTROLLER_BUTTON_A, "east": C.CONTROLLER_BUTTON_B, "west": C.CONTROLLER_BUTTON_X,
+           "north": C.CONTROLLER_BUTTON_Y, "left-trigger": C.CONTROLLER_BUTTON_LEFTSHOULDER,
+           "right-trigger": C.CONTROLLER_BUTTON_RIGHTSHOULDER, "select": C.CONTROLLER_BUTTON_BACK,
+           "start": C.CONTROLLER_BUTTON_START, "dpad-up": C.CONTROLLER_BUTTON_DPAD_UP,
+           "dpad-down": C.CONTROLLER_BUTTON_DPAD_DOWN, "dpad-left": C.CONTROLLER_BUTTON_DPAD_LEFT,
+           "dpad-right": C.CONTROLLER_BUTTON_DPAD_RIGHT}
+    # SDL names a Nintendo pad's buttons by their labels: the bottom one is "B"
+    POS_NINTENDO = {**POS, "south": C.CONTROLLER_BUTTON_B, "east": C.CONTROLLER_BUTTON_A,
+                    "west": C.CONTROLLER_BUTTON_Y, "north": C.CONTROLLER_BUTTON_X}
+    STICK = {"dpad-left": (C.CONTROLLER_AXIS_LEFTX, -1), "dpad-right": (C.CONTROLLER_AXIS_LEFTX, 1),
+             "dpad-up": (C.CONTROLLER_AXIS_LEFTY, -1), "dpad-down": (C.CONTROLLER_AXIS_LEFTY, 1)}
+
+    MIN_HOLD = 0.15                                                 # s: Flash games often check keys a few times a second
+
+    def __init__(self, xin, buttons):
+        self.xin = xin
+        self.map = {b: [k for k in str(v).split("+") if k in PageInput.SYMS] for b, v in {**FLASH_BUTTONS, **(buttons or {})}.items()
+                    if b in self.POS}
+        self.held = {}; self.armed = False; self.clicking = False; self.started = False
+
+    def tick(self, pads):
+        """pads: [(controller, style)]. Reads them and sends what changed."""
+        if not pads: return
+        nin = pads[0][1] in ("nintendo", "snes")
+        sel = "east" if nin else "south"
+        down = {b: False for b in self.map}; rx = ry = 0.0
+        for c, style in pads:
+            pos = self.POS_NINTENDO if style == "nintendo" else self.POS
+            try:
+                for b in self.map: down[b] = down[b] or bool(c.get_button(pos[b]))
+                for b, (ax, sign) in self.STICK.items():
+                    if c.get_axis(ax) * sign > 16000: down[b] = True
+                vx, vy = c.get_axis(self.C.CONTROLLER_AXIS_RIGHTX) / 32767, c.get_axis(self.C.CONTROLLER_AXIS_RIGHTY) / 32767
+                if abs(vx) + abs(vy) > abs(rx) + abs(ry): rx, ry = vx, vy
+            except Exception: pass
+        mag = max(abs(rx), abs(ry))
+        if mag > 0.2:                                               # the right stick moves the mouse pointer
+            if not self.started: self.xin.centre(); self.started = True
+            sp = self.xin.scale * (2 + 16 * mag * mag) / max(mag, 1e-6)
+            self.xin.move(rx * sp, ry * sp); self.armed = True
+        for b in self.map:                                          # anything else is for the game: pointer done
+            if b != sel and down[b] and not self.held.get(b): self.armed = False
+        if down[sel] and not self.held.get(sel) and self.armed:     # a click
+            self.clicking = True; self.armed = False; self.xin.click(True)
+        elif not down[sel] and self.clicking:
+            self.clicking = False; self.xin.click(False)
+        now = time.time()
+        for b, keys in self.map.items():
+            want = down[b] and not (b == sel and self.clicking)
+            if not want and self.held.get(b + ":k") and now - self.held.get(b + ":t", 0) < self.MIN_HOLD:
+                want = True                                         # a quick tap is held long enough to be seen
+            if want != bool(self.held.get(b + ":k")):
+                for k in keys: self.xin.key(k, want)
+                self.held[b + ":k"] = want
+                if want: self.held[b + ":t"] = now
+            self.held[b] = down[b]
+        self.xin.flush()
+
+    def release(self):
+        self.held = {}; self.clicking = False; self.xin.release_all()
+
+
+def sdl_controller_update():
+    """SDL_GameControllerUpdate from the SDL library pygame uses: refreshes the controllers' button states while
+    Insert Coin has no window (pygame's event functions need one). None if it can't be found."""
+    try:
+        lib = next((ln.split()[-1] for ln in open("/proc/self/maps") if re.search(r"/libSDL2-2\.0\.so|/libSDL2-2-[0-9a-f]+\.0\.so", ln)), None)
+        return ctypes.CDLL(lib or "libSDL2-2.0.so.0").SDL_GameControllerUpdate
+    except Exception:
+        return None
+
+
 def rom_stem(path):
     """The game's own file name without extension: 'a.zip#Game (USA).nes' -> 'Game (USA)'. Saves are named after it."""
     return os.path.splitext(os.path.basename(split_archive(path)[1] or path))[0]
@@ -296,8 +785,44 @@ class Library:
             games.sort(key=lambda g: g.key)
             fn, maker, col = FRIENDLY.get(name, (name.split(" - ")[-1], name.split(" - ")[0], (90, 100, 130)))
             self.systems.append({"id": name, "name": fn, "maker": maker, "color": col, "games": games, "special": None})
+        web = load_web_playlists()                                  # browser games: after the systems
+        self.systems += web
+        self.web_index = {g.path: g for s in web for g in s["games"]}
         self.favorites_raw = (self._read(f"{RA}/content_favorites.lpl") or {"version": "1.5", "items": []})
         self.refresh_specials()
+
+    # Browser games can't go into RetroArch's favorites / history (it can't open them), so Insert Coin keeps its
+    # own: favorites, when each was played, and a short log of every launch, to slot them into Recently Played.
+    STATE = "played.json"
+
+    def _state(self):
+        d = self._read(f"{CONFDIR}/{self.STATE}") or {}
+        for k in ("favorites", "recent", "launches"): d.setdefault(k, [])
+        return d
+
+    def _save_state(self, d):
+        os.makedirs(CONFDIR, exist_ok=True)
+        tmp = f"{CONFDIR}/{self.STATE}.tmp"
+        with open(tmp, "w", encoding="utf-8") as f: json.dump(d, f, indent=1)
+        os.replace(tmp, f"{CONFDIR}/{self.STATE}")
+
+    def note_launch(self, g, t=None):
+        """Every game started from Insert Coin, newest last (kept to 300). Browser games also go into 'recent'."""
+        d = self._state(); t = t or time.time(); web = isinstance(g, WebGame)
+        d["launches"] = (d["launches"] + [{"path": g.path, "web": web, "t": round(t)}])[-300:]
+        if web: d["recent"] = ([{"path": g.path, "t": round(t)}] + [r for r in d["recent"] if r.get("path") != g.path])[:60]
+        self._save_state(d)
+
+    def _web_recent(self, rec, d):
+        """Merge browser games into RetroArch's Recently Played: each goes in front of the games launched before
+        it, counting the games started from Insert Coin since then (RetroArch's history has no times)."""
+        launches = d["launches"]; ranked = [((i, 0), g) for i, g in enumerate(rec)]
+        for r in d["recent"]:
+            g = self.web_index.get(r.get("path"))
+            if not g: continue
+            newer = {x["path"] for x in launches if not x.get("web") and x.get("t", 0) > r.get("t", 0)}
+            ranked.append(((min(len(newer), len(rec)) - 0.5, -r.get("t", 0)), g))
+        return [g for _, g in sorted(ranked, key=lambda x: x[0])]
 
     def _special_games(self, items):
         out = []
@@ -312,23 +837,34 @@ class Library:
         hist = self._read(f"{RA}/content_history.lpl") or {"items": []}
         self.favorites_raw = self._read(f"{RA}/content_favorites.lpl") or {"version": "1.5", "items": []}
         fav = self._special_games(self.favorites_raw.get("items", []))
-        fav = sorted(dedupe(fav, set()) if self.one_per_game else fav, key=lambda g: g.key)
+        fav = dedupe(fav, set()) if self.one_per_game else fav
+        st = self._state() if self.web_index else None
+        if st: fav += [self.web_index[p] for p in st["favorites"] if p in self.web_index]
+        fav = sorted(fav, key=lambda g: g.key)
         seen, rec = set(), []
         for g in self._special_games(hist.get("items", [])):
             k = (g.db, g.label) if self.one_per_game else g.path
             if k not in seen: seen.add(k); rec.append(g)
+        if st: rec = self._web_recent(rec, st)
         specials = []
         if fav: specials.append({"id": "favorites", "name": "Favorites", "maker": "Your picks", "color": (230, 180, 40), "games": fav, "special": "fav"})
         if rec: specials.append({"id": "recent", "name": "Recently Played", "maker": "Pick up where you left off", "color": (60, 170, 200), "games": rec[:60], "special": "recent"})
         self.systems = specials + self.systems
         self.fav_paths = {it.get("path") for it in self.favorites_raw.get("items", [])}
         self.fav_keys = {(it.get("db_name") or "", it.get("label")) for it in self.favorites_raw.get("items", [])}
+        self.web_favs = set(st["favorites"]) if st else set()
 
     def is_fav(self, g):
         """A favorite, whichever copy of the game was starred."""
+        if isinstance(g, WebGame): return g.path in self.web_favs
         return g.path in self.fav_paths or ((g.db or ""), g.label) in self.fav_keys
 
     def toggle_favorite(self, g):
+        if isinstance(g, WebGame):
+            d = self._state(); added = g.path not in d["favorites"]
+            d["favorites"] = [p for p in d["favorites"] if p != g.path] + ([g.path] if added else [])
+            self._save_state(d); self.web_favs = set(d["favorites"])
+            return added
         items = self.favorites_raw.setdefault("items", [])
         same = lambda it: it.get("path") == g.path or ((it.get("db_name") or ""), it.get("label")) == ((g.db or ""), g.label)
         if self.is_fav(g):
@@ -420,6 +956,7 @@ class Meta:
                 pass
 
     def get(self, g):
+        if isinstance(g, WebGame): return g.info                     # year / publisher from browser_games.json
         db = g.system or ""
         with self.lock: m = self.data.get(db)
         if not m: return None
@@ -627,6 +1164,10 @@ def star(surf, center, r, color=(255, 210, 60)):
     pts = [(cx + (r if k % 2 == 0 else r * 0.45) * math.sin(k * math.pi / 5), cy - (r if k % 2 == 0 else r * 0.45) * math.cos(k * math.pi / 5)) for k in range(10)]
     pygame.draw.polygon(surf, (0, 0, 0), [(x + 2, y + 3) for x, y in pts])
     pygame.draw.polygon(surf, color, pts)
+
+
+def n_games(n):
+    return f"{n:,} game" + ("" if n == 1 else "s")
 
 
 def shade(c, f):
@@ -916,7 +1457,7 @@ class App:
     def favorite(self):
         g = self.cur_game() if self.screen_mode == "games" else None
         if not g: return
-        if subprocess.run(["pgrep", "-x", "retroarch"], capture_output=True).returncode == 0:
+        if not isinstance(g, WebGame) and subprocess.run(["pgrep", "-x", "retroarch"], capture_output=True).returncode == 0:
             self.err("Close RetroArch first to change favorites"); return
         added = self.lib.toggle_favorite(g)
         self.sfx.play("fav_on" if added else "fav_off")
@@ -926,6 +1467,7 @@ class App:
         if self.sys["id"] != sid: self.screen_mode = "systems"
 
     def launch(self, g):
+        if isinstance(g, WebGame): return self.launch_browser(g)
         if not g.core:
             self.err("No core is set for this game yet - assign one in RetroArch"); return
         if not os.path.exists(split_archive(g.path)[0]):
@@ -974,17 +1516,121 @@ class App:
         if engine and rc == 0 and took >= 3:
             try: self.lib.add_history(g)
             except Exception as e: log.warning("Could not update Recently Played: %s", e)
+        if rc is not None and took >= 3:
+            try: self.lib.note_launch(g, t0)                        # so browser games sort into Recently Played
+            except Exception as e: log.warning("Could not note the launch: %s", e)
+        self.back_from_game()
+        quit_by_user = False
+        if engine:
+            try: quit_by_user = "Quit chosen from the game menu" in open(ralog, errors="replace").read()
+            except OSError: pass
+        if took < 3 and not quit_by_user: self.err("The game closed straight away - it may need a different core")
+
+    def back_from_game(self):
+        """The game has ended: screen, controllers (they may have changed), sound, and the lists back."""
         pygame.display.init(); self.open_display(); self.rescan_pads(); self.sfx.open()
         self.img.cache.clear(); self.prev_bg = None
         pygame.event.clear(); self.hold.clear()
         sid, gid = self.sys["id"], self.cur_gi()
         self.lib.refresh_specials()
         self.si = next((i for i, s in enumerate(self.lib.systems) if s["id"] == sid), 0); self.gi[sid] = gid
-        quit_by_user = False
-        if engine:
-            try: quit_by_user = "Quit chosen from the game menu" in open(ralog, errors="replace").read()
-            except OSError: pass
-        if took < 3 and not quit_by_user: self.err("The game closed straight away - it may need a different core")
+
+    def launch_browser(self, g):
+        """A browser game: serve its folder on 127.0.0.1 (a random port, nothing reachable from outside), open the
+        start page full-screen in its own browser profile, and watch the controllers for Select + Start, which
+        closes the browser and comes back here. The page itself reads the pad through the Gamepad API."""
+        if not os.path.isfile(g.path): self.err("Game file not found"); return
+        br = find_browser()
+        if not br: self.err("Browser games need Google Chrome, Chromium or Firefox"); return
+        if g.flash and not os.path.isfile(f"{RUFFLE}/ruffle.js"):
+            self.err("Flash games need Ruffle - see the README (Browser and Flash games)"); return
+        self.sfx.play("coin"); self.draw(); self.splash(g, web=True)
+        self.sfx.finish(); self.sfx.close()
+        os.makedirs(LOGDIR, exist_ok=True)
+        ralog = f"{LOGDIR}/browser-last.log"
+        if os.path.exists(ralog): os.replace(ralog, f"{LOGDIR}/browser-previous.log")
+        server = rc = None; quit_by_user = False; t0 = time.time()
+        try:
+            flashpad = None                                         # Chrome-family browsers: genuine input via DevTools
+            if FLASH_DEVTOOLS_INPUT and g.flash and "firefox" not in os.path.basename(br):
+                flashpad = FlashPad(PageInput(), g.buttons)
+            server = serve_folder(g.folder, (g.start, g.title, g.buttons, flashpad is not None) if g.flash else None)
+            url = f"http://127.0.0.1:{server.server_address[1]}/" + (FLASH_PAGE if g.flash else urllib.parse.quote(g.start))
+            close_stale_browsers()
+            cmd = browser_command(br, url, self.windowed) + (["--remote-debugging-pipe"] if flashpad else [])
+            log.info("Launch (browser, %s): %s | %s", os.path.basename(br), g.label, g.path)
+            pygame.display.quit()
+            with open(ralog, "w") as out:
+                if flashpad:                                        # the pipe goes to the browser as fds 3 and 4
+                    proc = subprocess.Popen(cmd, stdout=out, stderr=subprocess.STDOUT, start_new_session=True,
+                                            close_fds=False, preexec_fn=flashpad.xin.child_fds)
+                    flashpad.xin.connected()
+                else:
+                    proc = subprocess.Popen(cmd, stdout=out, stderr=subprocess.STDOUT, start_new_session=True)
+                quit_by_user = self.watch_quit_combo(proc, flashpad)
+                if quit_by_user:
+                    log.info("Select + Start: closing the browser")
+                    for sig, wait in ((signal.SIGTERM, 4), (signal.SIGKILL, 2)):
+                        try: os.killpg(proc.pid, sig)
+                        except ProcessLookupError: break
+                        try: proc.wait(wait); break
+                        except subprocess.TimeoutExpired: pass
+                rc = proc.wait()
+        except Exception as e:
+            self.err(f"Could not start the browser: {e}"); log.exception("Browser game failed")
+        finally:
+            if server: server.shutdown(); server.server_close()
+            if flashpad:
+                log.info("Flash input sent: %s", ", ".join(f"{k} x{n}" for k, n in sorted(flashpad.xin.stats.items())) or "nothing")
+                flashpad.xin.close()
+        took = time.time() - t0
+        log.info("Browser game ended after %d min %02d s (%s, exit %s)", took // 60, took % 60,
+                 "Select + Start" if quit_by_user else "browser closed", rc)
+        if rc is not None and took >= 3:
+            try: self.lib.note_launch(g, t0)
+            except Exception as e: log.warning("Could not update Recently Played: %s", e)
+        if not pygame.display.get_init(): self.back_from_game()
+        else: self.sfx.open()
+        if rc is not None and took < 3 and not quit_by_user: self.err("The browser closed straight away - see browser-last.log")
+
+    def watch_quit_combo(self, proc, flash=None):
+        """While the browser runs (Insert Coin has no window then, so no events): read the controllers directly,
+        and return True when Select + Start (Back + Start, Share + Options...) is held on any of them.
+        flash: a FlashPad that turns the pad into keys and a mouse, used only while the game's window is active."""
+        update = sdl_controller_update()
+        pads = [(c, self.pad_style.get(c.as_joystick().get_instance_id(), "xbox")) for c in self.pads.values()]
+        n = sdlc.get_count(); last_check = time.time(); ready = False; ready_at = 0
+        BACK, START = pygame.CONTROLLER_BUTTON_BACK, pygame.CONTROLLER_BUTTON_START
+        try:
+            while proc.poll() is None:
+                time.sleep(0.016 if flash else 0.03)
+                if not update: continue
+                update()
+                if time.time() - last_check > 2:                    # a pad plugged in while the game runs
+                    last_check = time.time()
+                    if sdlc.get_count() != n:
+                        n = sdlc.get_count(); pads = []
+                        for i in range(n):
+                            try:
+                                if sdlc.is_controller(i):
+                                    c = sdlc.Controller(i); j = c.as_joystick()
+                                    pads.append((c, controller_style(c.name, j.get_guid())))
+                            except Exception: pass
+                for c, _ in pads:
+                    try:
+                        if c.get_button(BACK) and c.get_button(START): return True
+                    except Exception: pass
+                if flash:
+                    if time.time() - ready_at > (3 if ready else 0.5):  # find the page; then re-check its size
+                        ready_at = time.time()
+                        was = ready
+                        try: ready = flash.xin.measure() if ready else flash.xin.attach()
+                        except Exception: ready = False
+                        if ready and not was: log.info("Flash: pad controls ready")
+                    if ready: flash.tick(pads)
+            return False
+        finally:
+            if flash: flash.release()
 
     # -- input handling with key repeat
     REPEAT_FIRST, REPEAT = 0.32, 0.075
@@ -1183,7 +1829,7 @@ class App:
                 pygame.draw.line(grad, (*shade(sy["color"], 0.25), int(235 * yy / (h * 0.45))), (0, yy), (w, yy))
             tile.blit(grad, (0, h * 0.55))
             text(tile, self.fonts(int(46 * sc), True), sy["name"], (26 * sc, h - 98 * sc), maxw=w - 40)
-            text(tile, self.fonts(int(24 * sc)), f"{sy['maker']}  ·  {len(sy['games']):,} games", (28 * sc, h - 42 * sc), (215, 220, 230), maxw=w - 40)
+            text(tile, self.fonts(int(24 * sc)), f"{sy['maker']}  ·  {n_games(len(sy['games']))}", (28 * sc, h - 42 * sc), (215, 220, 230), maxw=w - 40)
             mask = pygame.Surface((w, h), pygame.SRCALPHA); rrect(mask, (255, 255, 255, 255), mask.get_rect(), 26)
             tile.blit(mask, (0, 0), special_flags=pygame.BLEND_RGBA_MIN)
             if ad > 0.5: tile.set_alpha(int(255 * max(0.35, 1 - 0.3 * ad)))
@@ -1192,13 +1838,13 @@ class App:
         dots_w = n * 22; x0 = W / 2 - dots_w / 2
         for i in range(n):
             pygame.draw.circle(self.screen, (255, 255, 255) if i == self.si else (110, 115, 130), (x0 + i * 22 + 11, 790), 6 if i == self.si else 4)
-        text(self.screen, self.fonts(30), s["maker"] if s["special"] else f"{len(s['games']):,} games", (W / 2, 850), (210, 215, 228), anchor="midtop")
+        text(self.screen, self.fonts(30), s["maker"] if s["special"] else n_games(len(s['games'])), (W / 2, 850), (210, 215, 228), anchor="midtop")
         if hints: self.draw_hints([("a", "Open"), ("b", "Power")])
 
     def draw_games(self, hints=True):
         s = self.sys; gs = self.games(); i = self.cur_gi(); g = gs[i] if gs else None
         self.draw_background(s["color"], g)
-        self.draw_header(s["name"], f"{len(gs):,} games  ·  {i + 1:,} / {len(gs):,}")
+        self.draw_header(s["name"], f"{n_games(len(gs))}  ·  {i + 1:,} / {len(gs):,}")
         self.gpos += (i - self.gpos) * 0.25
         if abs(i - self.gpos) > 40: self.gpos = i - 40 * (1 if i > self.gpos else -1)
         cx, cy, H0 = 700, 470, 470
@@ -1249,7 +1895,7 @@ class App:
             t = [x for x in tags(g.label) if len(x) < 30][:2]
             info += t
             if info: text(self.screen, self.fonts(28), "  ·  ".join(info), (cx, 846), (205, 210, 225), anchor="midtop", maxw=1250)
-            if not g.core:
+            if not g.core and not isinstance(g, WebGame):
                 text(self.screen, self.fonts(24), "No core assigned", (cx, 892), (240, 150, 120), anchor="midtop")
             elif g.versions:                                        # "3 versions · (X) to choose", with this pad's own X button
                 f1, f2 = self.fonts(26, True), self.fonts(26)
@@ -1336,12 +1982,15 @@ class App:
         text(self.screen, self.fonts(26), "Buttons, the d-pad and sticks all work.   Esc on the keyboard cancels.",
              (W / 2, H - 70), (170, 175, 190), anchor="midtop")
 
-    def splash(self, g, engine=False):
+    def splash(self, g, engine=False, web=False):
         self.screen.fill((0, 0, 0))
         im = self.img.get(g.thumb("Named_Boxarts"), 420, 520)
         if im: self.screen.blit(im, im.get_rect(center=(W / 2, H / 2 - 60)))
         text(self.screen, self.fonts(44, True), g.title, (W / 2, H / 2 + 250), anchor="midtop", maxw=1500)
-        text(self.screen, self.fonts(26), f"Starting…   ({self.pad_quit.get(self.cur_pad, QUIT_COMBO[self.style]) if self.style != 'keyboard' else 'Esc'} opens the game menu)", (W / 2, H / 2 + 320), (180, 185, 200), anchor="midtop")
+        combo = self.pad_quit.get(self.cur_pad, QUIT_COMBO[self.style]) if self.style != 'keyboard' else 'Esc'
+        note = (f"{combo} returns to Insert Coin" if self.style != "keyboard" else "Alt + F4 returns to Insert Coin") if web \
+            else f"{combo} opens the game menu"
+        text(self.screen, self.fonts(26), f"Starting…   ({note})", (W / 2, H / 2 + 320), (180, 185, 200), anchor="midtop")
         pygame.display.flip()
 
     def draw_empty(self):
