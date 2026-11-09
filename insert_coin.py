@@ -287,8 +287,19 @@ window.addEventListener("load", () => {{
   p.focus(); window.addEventListener("click", () => p.focus());
   let x = innerWidth / 2, y = innerHeight / 2, down = false, seen = 0;
   const target = () => (p.shadowRoot && p.shadowRoot.querySelector("canvas")) || p;
-  const send = (type, buttons) => target().dispatchEvent(new PointerEvent(type, {{bubbles: true, composed: true,
-      clientX: x, clientY: y, pointerId: 1, pointerType: "mouse", isPrimary: true, button: 0, buttons}}));
+  // Ruffle reads offsetX/Y, and Chrome works those out for page-made pointer events as if unscaled: at 2x display scaling
+  // a click would land at half the distance. Measure that once per event and compensate, so any scaling works.
+  const scale = (c, r) => {{
+    let k = 1;
+    c.addEventListener("ic-measure", e => {{ if (e.offsetX > 0) k = 100 / e.offsetX; }}, {{once: true}});
+    c.dispatchEvent(new PointerEvent("ic-measure", {{clientX: r.left + 100, clientY: r.top + 100}}));
+    return k;
+  }};
+  const send = (type, buttons) => {{
+    const c = target(), r = c.getBoundingClientRect(), k = scale(c, r);
+    c.dispatchEvent(new PointerEvent(type, {{bubbles: true, composed: true, clientX: r.left + (x - r.left) * k,
+        clientY: r.top + (y - r.top) * k, pointerId: 1, pointerType: "mouse", isPrimary: true, button: 0, buttons}}));
+  }};
   (function tick() {{
     for (const g of navigator.getGamepads ? navigator.getGamepads() : []) {{
       if (!g) continue;
