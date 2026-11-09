@@ -547,8 +547,6 @@ class PageInput:
             r = self.send("Target.attachToTarget", wait=True, targetId=page["targetId"], flatten=True) or {}
             self.session = r.get("sessionId")
             if not self.session: return False
-            # keys reach the page even when its window isn't the focused one (clicks always do; keys may not)
-            self.send("Emulation.setFocusEmulationEnabled", enabled=True)
         r = self.send("Runtime.evaluate", wait=True, returnByValue=True,
                       expression="(() => { const p = document.querySelector('ruffle-player'); return !!p && p.readyState === 2; })()") or {}
         if not (r.get("result") or {}).get("value") or not self.measure(): return False

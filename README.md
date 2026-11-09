@@ -456,6 +456,7 @@ also runs in a window, and that is not saved.
 | **No menu sounds** | Check **B** on the home screen shows **Sound: On**, and that your system volume is up. Without a working audio device Insert Coin simply runs silently. Game sound is handled separately and isn't affected. |
 | **Sticks feel swapped in an N64 shooter** | Many N64 shooters walk with the C-buttons and aim with the stick, and RetroArch puts the C-buttons on your right stick. In the game, open RetroArch's menu (**Select + Start**) → *Controls → Port 1 Controls*, swap the Left and Right Analog entries, then *Manage Remap Files → Save Game Remap File*. It applies to that game only. |
 | **A browser game has no sound, or ignores the pad** | Press a button on the pad once the game shows: browsers only report a controller after it's used on the page. If a Flash game doesn't respond to a button, set it in `buttons` (see [Browser and Flash games](#browser-and-flash-games)). |
+| **A Flash screen ignores the pad** | A few Flash screens only react to a real key held on the keyboard (for example a "Press space bar to continue" that checks the key at one moment). Use the keyboard there; it always works alongside the pad. |
 | **"Flash games need Ruffle"** | Install Ruffle as described in [Browser and Flash games](#browser-and-flash-games). |
 | **Stutters while scrolling the first time** | Artwork loads in the background on first view, then stays cached for the session. |
 
