@@ -15,13 +15,15 @@ Controls (Xbox-style pad; keyboard in brackets)
   LB / RB             previous / next letter   [PageUp / PageDown]
   Menu sounds can be switched off in the B menu (saved in ~/.config/insert-coin/settings.json).
   In a game: Select+Start opens the game menu (Resume / Quit game, or RetroArch's Quick Menu).
+  Browser and Flash games (~/.config/insert-coin/browser_games.json): Select+Start returns here.
 
 Options: --windowed   run in a window (for testing)
          --shot DIR   render sample screens to PNG files and exit (no display needed)
 """
 __version__ = "0.4.3"
 
-import json, os, re, sys, time, random, threading, subprocess, collections, logging, faulthandler, platform
+import json, os, re, sys, time, random, threading, subprocess, collections, logging, faulthandler, platform, signal, shutil
+import ctypes, functools, http.server, urllib.parse
 
 os.environ.setdefault("PYGAME_HIDE_SUPPORT_PROMPT", "1")
 import pygame
@@ -201,6 +203,190 @@ class Game:
         return f"{RA}/thumbnails/{thumb_system(self.db)}/{kind}/{sanitize(self.label)}.png"
 
 
+class WebGame(Game):
+    """A browser game: a folder with an HTML start page, listed in browser_games.json. Insert Coin serves the
+    folder on 127.0.0.1 and opens the page full-screen in a browser (see App.launch_browser)."""
+    __slots__ = ("folder", "start", "art", "info", "buttons")
+
+    def __init__(self, spec, playlist):
+        self.folder = os.path.expanduser(spec["folder"])
+        self.start = spec.get("start") or "index.html"
+        self.label = spec.get("title") or os.path.basename(self.folder.rstrip("/"))
+        self.path = os.path.join(self.folder, self.start)
+        self.core = None; self.db = playlist; self.system = playlist; self.versions = None
+        self.title = self.label; self.letter = letter_of(self.label); self.key = sort_key(self.label)
+        art = {k: os.path.join(self.folder, os.path.expanduser(spec[k])) for k in ("boxart", "title_screen", "snap") if spec.get(k)}
+        first = next(iter(art.values()), "")
+        self.art = {"Named_Boxarts": art.get("boxart", first), "Named_Titles": art.get("title_screen", first),
+                    "Named_Snaps": art.get("snap", first)}
+        self.info = [str(spec.get("year") or ""), spec.get("publisher") or ""] if spec.get("year") or spec.get("publisher") else None
+        self.buttons = spec.get("buttons") or {}                    # Flash games: pad button -> key
+
+    @property
+    def flash(self): return self.start.lower().endswith(".swf")
+
+    def thumb(self, kind):
+        return self.art.get(kind, "")
+
+
+def load_web_playlists():
+    """browser_games.json in the config folder: {"playlists": [{"name", "maker", "color", "games": [{"title",
+    "folder", "start", "boxart", "title_screen", "snap", "year", "publisher"}]}]}. Image paths are relative to the
+    game's folder (or absolute). Games whose folder or start page is missing are skipped."""
+    try:
+        with open(f"{CONFDIR}/browser_games.json", encoding="utf-8") as f: d = json.load(f)
+    except FileNotFoundError: return []
+    except Exception as e: log.warning("browser_games.json could not be read: %s", e); return []
+    out = []
+    for p in d.get("playlists", []):
+        name = p.get("name") or "Browser games"
+        games = []
+        for spec in p.get("games", []):
+            try:
+                g = WebGame(spec, name)
+                if os.path.isfile(g.path): games.append(g)
+                else: log.warning("Browser game not found: %s", g.path)
+            except Exception as e: log.warning("Browser game skipped (%s): %s", e, spec)
+        if games:
+            col = tuple(p.get("color") or (230, 90, 60))[:3]
+            out.append({"id": "web:" + name, "name": name, "maker": p.get("maker") or "Browser games", "color": col,
+                        "games": sorted(games, key=lambda g: g.key), "special": None})
+    return out
+
+
+# ---------------------------------------------------------------- browser games: local server, browser, pad watch
+RUFFLE = f"{APPDIR}/ruffle"                                         # Ruffle's self-hosted web build: plays Flash (.swf)
+FLASH_PAGE = "__insert_coin_flash__.html"
+# Flash games only know the keyboard: pad button -> key it presses (Ruffle's names; overridable per game, "buttons")
+FLASH_BUTTONS = {"dpad-up": "Up", "dpad-down": "Down", "dpad-left": "Left", "dpad-right": "Right",
+                 "south": "Space", "east": "Enter", "west": "Z", "north": "X", "start": "Enter"}
+KEYCODES = {"Up": 38, "Down": 40, "Left": 37, "Right": 39, "Space": 32, "Enter": 13, "Shift": 16, "Ctrl": 17,
+            "Alt": 18, "Tab": 9, "Escape": 27, "Backspace": 8, **{c: ord(c) for c in "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"}}
+
+
+def flash_page(swf, title, buttons=None):
+    """A full-screen page that plays one .swf with Ruffle, the pad's buttons pressing the keys the game uses."""
+    m = {b: KEYCODES[k] for b, k in {**FLASH_BUTTONS, **(buttons or {})}.items() if k in KEYCODES}
+    cfg = {"autoplay": "on", "unmuteOverlay": "hidden", "splashScreen": False, "letterbox": "on", "contextMenu": "off",
+           "showSwfDownload": False, "gamepadButtonMapping": m}
+    esc = lambda x: x.replace("&", "&amp;").replace("<", "&lt;")
+    return f"""<!doctype html><meta charset="utf-8"><title>{esc(title)}</title>
+<style>html,body{{margin:0;height:100%;background:#000;overflow:hidden}}ruffle-player{{width:100vw;height:100vh;display:block}}
+#ptr{{position:fixed;left:0;top:0;width:0;height:0;pointer-events:none;z-index:9;display:none;
+border-left:11px solid transparent;border-right:11px solid transparent;border-bottom:26px solid #fff;
+margin-left:-11px;filter:drop-shadow(0 0 2px #000) drop-shadow(0 0 1px #000);transform-origin:50% 0;rotate:-30deg}}</style>
+<script>window.RufflePlayer = {{config: {json.dumps(cfg)}}};</script>
+<script src="/__ruffle__/ruffle.js"></script>
+<div id="ptr"></div>
+<script>
+// Flash menus are often mouse-only: the right stick moves a pointer and RT (or clicking the right stick) clicks.
+window.addEventListener("load", () => {{
+  const p = window.RufflePlayer.newest().createPlayer(), ptr = document.getElementById("ptr");
+  document.body.appendChild(p);
+  p.load({{url: {json.dumps(urllib.parse.quote(swf))}}}).then(() => p.focus());
+  p.focus(); window.addEventListener("click", () => p.focus());
+  let x = innerWidth / 2, y = innerHeight / 2, down = false, seen = 0;
+  const target = () => (p.shadowRoot && p.shadowRoot.querySelector("canvas")) || p;
+  const send = (type, buttons) => target().dispatchEvent(new PointerEvent(type, {{bubbles: true, composed: true,
+      clientX: x, clientY: y, pointerId: 1, pointerType: "mouse", isPrimary: true, button: 0, buttons}}));
+  (function tick() {{
+    for (const g of navigator.getGamepads ? navigator.getGamepads() : []) {{
+      if (!g) continue;
+      const ax = g.axes[2] || 0, ay = g.axes[3] || 0, dz = 0.2;
+      if (Math.abs(ax) > dz || Math.abs(ay) > dz) {{
+        const sp = 14 * Math.max(Math.abs(ax), Math.abs(ay));
+        x = Math.min(innerWidth - 1, Math.max(0, x + ax * sp)); y = Math.min(innerHeight - 1, Math.max(0, y + ay * sp));
+        seen = performance.now(); send("pointermove", down ? 1 : 0);
+      }}
+      const b = (g.buttons[7] && g.buttons[7].value > 0.5) || (g.buttons[11] && g.buttons[11].pressed);
+      if (b !== down) {{ down = b; seen = performance.now(); send(b ? "pointerdown" : "pointerup", b ? 1 : 0); p.focus(); }}
+      break;
+    }}
+    const on = performance.now() - seen < 4000;
+    ptr.style.display = on ? "block" : "none"; if (on) ptr.style.translate = x + "px " + y + "px";
+    requestAnimationFrame(tick);
+  }})();
+}});
+</script>"""
+
+
+class QuietHandler(http.server.SimpleHTTPRequestHandler):
+    flash = None                                                    # (swf, title, buttons) when serving a Flash game
+
+    def log_message(self, *a): pass
+
+    def end_headers(self):                                          # always the files on disk, never a stale copy
+        self.send_header("Cache-Control", "no-store"); super().end_headers()
+
+    def translate_path(self, path):
+        if path.startswith("/__ruffle__/"):                         # Ruffle's files, from Insert Coin's own folder
+            name = os.path.basename(urllib.parse.unquote(path.split("?")[0]))
+            return os.path.join(RUFFLE, name)
+        return super().translate_path(path)
+
+    def do_GET(self):
+        if self.flash and self.path.split("?")[0] == "/" + FLASH_PAGE:
+            body = flash_page(*self.flash).encode()
+            self.send_response(200); self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(body))); self.end_headers(); self.wfile.write(body); return
+        super().do_GET()
+
+
+QuietHandler.extensions_map = {**http.server.SimpleHTTPRequestHandler.extensions_map, ".wasm": "application/wasm",
+                               ".swf": "application/x-shockwave-flash", ".js": "text/javascript"}
+
+
+def serve_folder(folder, flash=None):
+    """Serve one game folder on 127.0.0.1 at a free port, in a background thread. Only this computer can reach it.
+    flash=(swf, title, buttons) also serves a page that plays that .swf with Ruffle."""
+    handler = type("Handler", (QuietHandler,), {"flash": flash})
+    srv = http.server.ThreadingHTTPServer(("127.0.0.1", 0), functools.partial(handler, directory=folder))
+    srv.daemon_threads = True
+    srv.handle_error = lambda *a: None                              # the browser hanging up mid-file is normal
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    return srv
+
+
+def find_browser():
+    for b in ("google-chrome", "google-chrome-stable", "chromium", "chromium-browser", "brave-browser", "firefox"):
+        p = shutil.which(b)
+        if p: return p
+    return None
+
+
+def browser_command(exe, url, windowed=False):
+    """Full-screen (kiosk) browser in its own profile, so the user's normal browser and its windows are untouched;
+    sound may start without a click first."""
+    prof = f"{APPDIR}/browser/" + ("firefox" if "firefox" in os.path.basename(exe) else "chrome")
+    os.makedirs(prof, exist_ok=True)
+    if "firefox" in os.path.basename(exe):
+        with open(f"{prof}/user.js", "w") as f:
+            for k, v in (("media.autoplay.default", "0"), ("browser.shell.checkDefaultBrowser", "false"),
+                         ("browser.sessionstore.resume_from_crash", "false"), ("datareporting.policy.dataSubmissionEnabled", "false"),
+                         ("browser.aboutwelcome.enabled", "false"), ("trailhead.firstrun.didSeeAboutWelcome", "true")):
+                f.write(f'user_pref("{k}", {v});\n')
+        return [exe, "--no-remote", "--profile", prof] + ([] if windowed else ["--kiosk"]) + [url]
+    try:                                                            # no "restore pages?" bubble after being closed
+        pf = f"{prof}/Default/Preferences"
+        with open(pf) as f: d = json.load(f)
+        d.setdefault("profile", {}).update(exit_type="Normal", exited_cleanly=True)
+        with open(pf, "w") as f: json.dump(d, f)
+    except Exception: pass
+    return [exe, f"--user-data-dir={prof}", "--no-first-run", "--no-default-browser-check", "--disable-session-crashed-bubble",
+            "--autoplay-policy=no-user-gesture-required", "--disable-features=Translate,MediaRouter", "--password-store=basic",
+            "--noerrdialogs"] + (["--window-size=1280,760", f"--app={url}"] if windowed else ["--kiosk", "--start-fullscreen", url])
+
+
+def sdl_controller_update():
+    """SDL_GameControllerUpdate from the SDL library pygame uses: refreshes the controllers' button states while
+    Insert Coin has no window (pygame's event functions need one). None if it can't be found."""
+    try:
+        lib = next((ln.split()[-1] for ln in open("/proc/self/maps") if re.search(r"/libSDL2-2\.0\.so|/libSDL2-2-[0-9a-f]+\.0\.so", ln)), None)
+        return ctypes.CDLL(lib or "libSDL2-2.0.so.0").SDL_GameControllerUpdate
+    except Exception:
+        return None
+
+
 def rom_stem(path):
     """The game's own file name without extension: 'a.zip#Game (USA).nes' -> 'Game (USA)'. Saves are named after it."""
     return os.path.splitext(os.path.basename(split_archive(path)[1] or path))[0]
@@ -296,8 +482,44 @@ class Library:
             games.sort(key=lambda g: g.key)
             fn, maker, col = FRIENDLY.get(name, (name.split(" - ")[-1], name.split(" - ")[0], (90, 100, 130)))
             self.systems.append({"id": name, "name": fn, "maker": maker, "color": col, "games": games, "special": None})
+        web = load_web_playlists()                                  # browser games: after the systems
+        self.systems += web
+        self.web_index = {g.path: g for s in web for g in s["games"]}
         self.favorites_raw = (self._read(f"{RA}/content_favorites.lpl") or {"version": "1.5", "items": []})
         self.refresh_specials()
+
+    # Browser games can't go into RetroArch's favorites / history (it can't open them), so Insert Coin keeps its
+    # own: favorites, when each was played, and a short log of every launch, to slot them into Recently Played.
+    STATE = "played.json"
+
+    def _state(self):
+        d = self._read(f"{CONFDIR}/{self.STATE}") or {}
+        for k in ("favorites", "recent", "launches"): d.setdefault(k, [])
+        return d
+
+    def _save_state(self, d):
+        os.makedirs(CONFDIR, exist_ok=True)
+        tmp = f"{CONFDIR}/{self.STATE}.tmp"
+        with open(tmp, "w", encoding="utf-8") as f: json.dump(d, f, indent=1)
+        os.replace(tmp, f"{CONFDIR}/{self.STATE}")
+
+    def note_launch(self, g, t=None):
+        """Every game started from Insert Coin, newest last (kept to 300). Browser games also go into 'recent'."""
+        d = self._state(); t = t or time.time(); web = isinstance(g, WebGame)
+        d["launches"] = (d["launches"] + [{"path": g.path, "web": web, "t": round(t)}])[-300:]
+        if web: d["recent"] = ([{"path": g.path, "t": round(t)}] + [r for r in d["recent"] if r.get("path") != g.path])[:60]
+        self._save_state(d)
+
+    def _web_recent(self, rec, d):
+        """Merge browser games into RetroArch's Recently Played: each goes in front of the games launched before
+        it, counting the games started from Insert Coin since then (RetroArch's history has no times)."""
+        launches = d["launches"]; ranked = [((i, 0), g) for i, g in enumerate(rec)]
+        for r in d["recent"]:
+            g = self.web_index.get(r.get("path"))
+            if not g: continue
+            newer = {x["path"] for x in launches if not x.get("web") and x.get("t", 0) > r.get("t", 0)}
+            ranked.append(((min(len(newer), len(rec)) - 0.5, -r.get("t", 0)), g))
+        return [g for _, g in sorted(ranked, key=lambda x: x[0])]
 
     def _special_games(self, items):
         out = []
@@ -312,23 +534,34 @@ class Library:
         hist = self._read(f"{RA}/content_history.lpl") or {"items": []}
         self.favorites_raw = self._read(f"{RA}/content_favorites.lpl") or {"version": "1.5", "items": []}
         fav = self._special_games(self.favorites_raw.get("items", []))
-        fav = sorted(dedupe(fav, set()) if self.one_per_game else fav, key=lambda g: g.key)
+        fav = dedupe(fav, set()) if self.one_per_game else fav
+        st = self._state() if self.web_index else None
+        if st: fav += [self.web_index[p] for p in st["favorites"] if p in self.web_index]
+        fav = sorted(fav, key=lambda g: g.key)
         seen, rec = set(), []
         for g in self._special_games(hist.get("items", [])):
             k = (g.db, g.label) if self.one_per_game else g.path
             if k not in seen: seen.add(k); rec.append(g)
+        if st: rec = self._web_recent(rec, st)
         specials = []
         if fav: specials.append({"id": "favorites", "name": "Favorites", "maker": "Your picks", "color": (230, 180, 40), "games": fav, "special": "fav"})
         if rec: specials.append({"id": "recent", "name": "Recently Played", "maker": "Pick up where you left off", "color": (60, 170, 200), "games": rec[:60], "special": "recent"})
         self.systems = specials + self.systems
         self.fav_paths = {it.get("path") for it in self.favorites_raw.get("items", [])}
         self.fav_keys = {(it.get("db_name") or "", it.get("label")) for it in self.favorites_raw.get("items", [])}
+        self.web_favs = set(st["favorites"]) if st else set()
 
     def is_fav(self, g):
         """A favorite, whichever copy of the game was starred."""
+        if isinstance(g, WebGame): return g.path in self.web_favs
         return g.path in self.fav_paths or ((g.db or ""), g.label) in self.fav_keys
 
     def toggle_favorite(self, g):
+        if isinstance(g, WebGame):
+            d = self._state(); added = g.path not in d["favorites"]
+            d["favorites"] = [p for p in d["favorites"] if p != g.path] + ([g.path] if added else [])
+            self._save_state(d); self.web_favs = set(d["favorites"])
+            return added
         items = self.favorites_raw.setdefault("items", [])
         same = lambda it: it.get("path") == g.path or ((it.get("db_name") or ""), it.get("label")) == ((g.db or ""), g.label)
         if self.is_fav(g):
@@ -420,6 +653,7 @@ class Meta:
                 pass
 
     def get(self, g):
+        if isinstance(g, WebGame): return g.info                     # year / publisher from browser_games.json
         db = g.system or ""
         with self.lock: m = self.data.get(db)
         if not m: return None
@@ -627,6 +861,10 @@ def star(surf, center, r, color=(255, 210, 60)):
     pts = [(cx + (r if k % 2 == 0 else r * 0.45) * math.sin(k * math.pi / 5), cy - (r if k % 2 == 0 else r * 0.45) * math.cos(k * math.pi / 5)) for k in range(10)]
     pygame.draw.polygon(surf, (0, 0, 0), [(x + 2, y + 3) for x, y in pts])
     pygame.draw.polygon(surf, color, pts)
+
+
+def n_games(n):
+    return f"{n:,} game" + ("" if n == 1 else "s")
 
 
 def shade(c, f):
@@ -916,7 +1154,7 @@ class App:
     def favorite(self):
         g = self.cur_game() if self.screen_mode == "games" else None
         if not g: return
-        if subprocess.run(["pgrep", "-x", "retroarch"], capture_output=True).returncode == 0:
+        if not isinstance(g, WebGame) and subprocess.run(["pgrep", "-x", "retroarch"], capture_output=True).returncode == 0:
             self.err("Close RetroArch first to change favorites"); return
         added = self.lib.toggle_favorite(g)
         self.sfx.play("fav_on" if added else "fav_off")
@@ -926,6 +1164,7 @@ class App:
         if self.sys["id"] != sid: self.screen_mode = "systems"
 
     def launch(self, g):
+        if isinstance(g, WebGame): return self.launch_browser(g)
         if not g.core:
             self.err("No core is set for this game yet - assign one in RetroArch"); return
         if not os.path.exists(split_archive(g.path)[0]):
@@ -974,17 +1213,94 @@ class App:
         if engine and rc == 0 and took >= 3:
             try: self.lib.add_history(g)
             except Exception as e: log.warning("Could not update Recently Played: %s", e)
+        if rc is not None and took >= 3:
+            try: self.lib.note_launch(g, t0)                        # so browser games sort into Recently Played
+            except Exception as e: log.warning("Could not note the launch: %s", e)
+        self.back_from_game()
+        quit_by_user = False
+        if engine:
+            try: quit_by_user = "Quit chosen from the game menu" in open(ralog, errors="replace").read()
+            except OSError: pass
+        if took < 3 and not quit_by_user: self.err("The game closed straight away - it may need a different core")
+
+    def back_from_game(self):
+        """The game has ended: screen, controllers (they may have changed), sound, and the lists back."""
         pygame.display.init(); self.open_display(); self.rescan_pads(); self.sfx.open()
         self.img.cache.clear(); self.prev_bg = None
         pygame.event.clear(); self.hold.clear()
         sid, gid = self.sys["id"], self.cur_gi()
         self.lib.refresh_specials()
         self.si = next((i for i, s in enumerate(self.lib.systems) if s["id"] == sid), 0); self.gi[sid] = gid
-        quit_by_user = False
-        if engine:
-            try: quit_by_user = "Quit chosen from the game menu" in open(ralog, errors="replace").read()
-            except OSError: pass
-        if took < 3 and not quit_by_user: self.err("The game closed straight away - it may need a different core")
+
+    def launch_browser(self, g):
+        """A browser game: serve its folder on 127.0.0.1 (a random port, nothing reachable from outside), open the
+        start page full-screen in its own browser profile, and watch the controllers for Select + Start, which
+        closes the browser and comes back here. The page itself reads the pad through the Gamepad API."""
+        if not os.path.isfile(g.path): self.err("Game file not found"); return
+        br = find_browser()
+        if not br: self.err("Browser games need Google Chrome, Chromium or Firefox"); return
+        if g.flash and not os.path.isfile(f"{RUFFLE}/ruffle.js"):
+            self.err("Flash games need Ruffle - see the README (Browser and Flash games)"); return
+        self.sfx.play("coin"); self.draw(); self.splash(g, web=True)
+        self.sfx.finish(); self.sfx.close()
+        os.makedirs(LOGDIR, exist_ok=True)
+        ralog = f"{LOGDIR}/browser-last.log"
+        if os.path.exists(ralog): os.replace(ralog, f"{LOGDIR}/browser-previous.log")
+        server = rc = None; quit_by_user = False; t0 = time.time()
+        try:
+            server = serve_folder(g.folder, (g.start, g.title, g.buttons) if g.flash else None)
+            url = f"http://127.0.0.1:{server.server_address[1]}/" + (FLASH_PAGE if g.flash else urllib.parse.quote(g.start))
+            cmd = browser_command(br, url, self.windowed)
+            log.info("Launch (browser, %s): %s | %s", os.path.basename(br), g.label, g.path)
+            pygame.display.quit()
+            with open(ralog, "w") as out:
+                proc = subprocess.Popen(cmd, stdout=out, stderr=subprocess.STDOUT, start_new_session=True)
+                quit_by_user = self.watch_quit_combo(proc)
+                if quit_by_user:
+                    log.info("Select + Start: closing the browser")
+                    for sig, wait in ((signal.SIGTERM, 4), (signal.SIGKILL, 2)):
+                        try: os.killpg(proc.pid, sig)
+                        except ProcessLookupError: break
+                        try: proc.wait(wait); break
+                        except subprocess.TimeoutExpired: pass
+                rc = proc.wait()
+        except Exception as e:
+            self.err(f"Could not start the browser: {e}"); log.exception("Browser game failed")
+        finally:
+            if server: server.shutdown(); server.server_close()
+        took = time.time() - t0
+        log.info("Browser game ended after %d min %02d s (%s, exit %s)", took // 60, took % 60,
+                 "Select + Start" if quit_by_user else "browser closed", rc)
+        if rc is not None and took >= 3:
+            try: self.lib.note_launch(g, t0)
+            except Exception as e: log.warning("Could not update Recently Played: %s", e)
+        if not pygame.display.get_init(): self.back_from_game()
+        else: self.sfx.open()
+        if rc is not None and took < 3 and not quit_by_user: self.err("The browser closed straight away - see browser-last.log")
+
+    def watch_quit_combo(self, proc):
+        """While the browser runs (Insert Coin has no window then, so no events): read the controllers directly,
+        and return True when Select + Start (Back + Start, Share + Options...) is held on any of them."""
+        update = sdl_controller_update()
+        pads = [c for c in self.pads.values()]; n = sdlc.get_count(); last_check = time.time()
+        BACK, START = pygame.CONTROLLER_BUTTON_BACK, pygame.CONTROLLER_BUTTON_START
+        while proc.poll() is None:
+            time.sleep(0.03)
+            if not update: continue
+            update()
+            if time.time() - last_check > 2:                        # a pad plugged in while the game runs
+                last_check = time.time()
+                if sdlc.get_count() != n:
+                    n = sdlc.get_count(); pads = []
+                    for i in range(n):
+                        try:
+                            if sdlc.is_controller(i): pads.append(sdlc.Controller(i))
+                        except Exception: pass
+            for c in pads:
+                try:
+                    if c.get_button(BACK) and c.get_button(START): return True
+                except Exception: pass
+        return False
 
     # -- input handling with key repeat
     REPEAT_FIRST, REPEAT = 0.32, 0.075
@@ -1183,7 +1499,7 @@ class App:
                 pygame.draw.line(grad, (*shade(sy["color"], 0.25), int(235 * yy / (h * 0.45))), (0, yy), (w, yy))
             tile.blit(grad, (0, h * 0.55))
             text(tile, self.fonts(int(46 * sc), True), sy["name"], (26 * sc, h - 98 * sc), maxw=w - 40)
-            text(tile, self.fonts(int(24 * sc)), f"{sy['maker']}  ·  {len(sy['games']):,} games", (28 * sc, h - 42 * sc), (215, 220, 230), maxw=w - 40)
+            text(tile, self.fonts(int(24 * sc)), f"{sy['maker']}  ·  {n_games(len(sy['games']))}", (28 * sc, h - 42 * sc), (215, 220, 230), maxw=w - 40)
             mask = pygame.Surface((w, h), pygame.SRCALPHA); rrect(mask, (255, 255, 255, 255), mask.get_rect(), 26)
             tile.blit(mask, (0, 0), special_flags=pygame.BLEND_RGBA_MIN)
             if ad > 0.5: tile.set_alpha(int(255 * max(0.35, 1 - 0.3 * ad)))
@@ -1192,13 +1508,13 @@ class App:
         dots_w = n * 22; x0 = W / 2 - dots_w / 2
         for i in range(n):
             pygame.draw.circle(self.screen, (255, 255, 255) if i == self.si else (110, 115, 130), (x0 + i * 22 + 11, 790), 6 if i == self.si else 4)
-        text(self.screen, self.fonts(30), s["maker"] if s["special"] else f"{len(s['games']):,} games", (W / 2, 850), (210, 215, 228), anchor="midtop")
+        text(self.screen, self.fonts(30), s["maker"] if s["special"] else n_games(len(s['games'])), (W / 2, 850), (210, 215, 228), anchor="midtop")
         if hints: self.draw_hints([("a", "Open"), ("b", "Power")])
 
     def draw_games(self, hints=True):
         s = self.sys; gs = self.games(); i = self.cur_gi(); g = gs[i] if gs else None
         self.draw_background(s["color"], g)
-        self.draw_header(s["name"], f"{len(gs):,} games  ·  {i + 1:,} / {len(gs):,}")
+        self.draw_header(s["name"], f"{n_games(len(gs))}  ·  {i + 1:,} / {len(gs):,}")
         self.gpos += (i - self.gpos) * 0.25
         if abs(i - self.gpos) > 40: self.gpos = i - 40 * (1 if i > self.gpos else -1)
         cx, cy, H0 = 700, 470, 470
@@ -1249,7 +1565,7 @@ class App:
             t = [x for x in tags(g.label) if len(x) < 30][:2]
             info += t
             if info: text(self.screen, self.fonts(28), "  ·  ".join(info), (cx, 846), (205, 210, 225), anchor="midtop", maxw=1250)
-            if not g.core:
+            if not g.core and not isinstance(g, WebGame):
                 text(self.screen, self.fonts(24), "No core assigned", (cx, 892), (240, 150, 120), anchor="midtop")
             elif g.versions:                                        # "3 versions · (X) to choose", with this pad's own X button
                 f1, f2 = self.fonts(26, True), self.fonts(26)
@@ -1336,12 +1652,15 @@ class App:
         text(self.screen, self.fonts(26), "Buttons, the d-pad and sticks all work.   Esc on the keyboard cancels.",
              (W / 2, H - 70), (170, 175, 190), anchor="midtop")
 
-    def splash(self, g, engine=False):
+    def splash(self, g, engine=False, web=False):
         self.screen.fill((0, 0, 0))
         im = self.img.get(g.thumb("Named_Boxarts"), 420, 520)
         if im: self.screen.blit(im, im.get_rect(center=(W / 2, H / 2 - 60)))
         text(self.screen, self.fonts(44, True), g.title, (W / 2, H / 2 + 250), anchor="midtop", maxw=1500)
-        text(self.screen, self.fonts(26), f"Starting…   ({self.pad_quit.get(self.cur_pad, QUIT_COMBO[self.style]) if self.style != 'keyboard' else 'Esc'} opens the game menu)", (W / 2, H / 2 + 320), (180, 185, 200), anchor="midtop")
+        combo = self.pad_quit.get(self.cur_pad, QUIT_COMBO[self.style]) if self.style != 'keyboard' else 'Esc'
+        note = (f"{combo} returns to Insert Coin" if self.style != "keyboard" else "Alt + F4 returns to Insert Coin") if web \
+            else f"{combo} opens the game menu"
+        text(self.screen, self.fonts(26), f"Starting…   ({note})", (W / 2, H / 2 + 320), (180, 185, 200), anchor="midtop")
         pygame.display.flip()
 
     def draw_empty(self):

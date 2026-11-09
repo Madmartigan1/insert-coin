@@ -4,6 +4,19 @@ All notable changes to Insert Coin. Versions follow [semantic versioning](https:
 before 1.0, minor versions add features and patch versions fix bugs.
 Each version is also a [GitHub Release](https://github.com/Madmartigan1/insert-coin/releases).
 
+## [Unreleased]
+
+### Added
+- **Browser and Flash games.** Playlists of games that run in a web browser — your own HTML5
+  games or old Flash (`.swf`) games — listed in `~/.config/insert-coin/browser_games.json`. They
+  open full-screen in their own browser profile, served only to this computer, and
+  **Select + Start** brings you back. Flash games play through Ruffle; the pad presses the keys
+  they expect (set per game), and the right stick moves a pointer for mouse-only menus, with RT
+  to click. Favorites and Recently Played work for them too.
+
+### Fixed
+- A list with a single game says "1 game", not "1 games".
+
 ## [0.4.3] — 2026-11-04 · "Message received"
 
 ### Changed
