@@ -215,8 +215,10 @@ so your normal browsing, tabs and windows are untouched.
 - **Flash games** play through [Ruffle](https://ruffle.rs), a free Flash player. Flash games only
   know the keyboard, so the pad presses keys for them: the D-pad is the arrow keys, and each
   button can be set per game (`buttons`, below). Many Flash menus are mouse-only: the **right
-  stick moves a pointer and RT clicks** (clicking the right stick works too). The mouse works as
-  well.
+  stick moves a pointer, and A clicks** while it shows — the same button that selects in Insert
+  Coin's menus (Cross on PlayStation, the right-hand A on Nintendo-style pads). The game doesn't
+  see that press, so a click is never also a punch; a few seconds after you stop using the
+  pointer it fades and A is the game's button again. RT also clicks. The mouse works as well.
 - **Favorites and Recently Played** work as for any other game. Insert Coin keeps them for these
   games itself, in `~/.config/insert-coin/played.json`, since RetroArch can't open them.
 

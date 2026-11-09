@@ -11,8 +11,8 @@ Each version is also a [GitHub Release](https://github.com/Madmartigan1/insert-c
   games or old Flash (`.swf`) games — listed in `~/.config/insert-coin/browser_games.json`. They
   open full-screen in their own browser profile, served only to this computer, and
   **Select + Start** brings you back. Flash games play through Ruffle; the pad presses the keys
-  they expect (set per game), and the right stick moves a pointer for mouse-only menus, with RT
-  to click. Favorites and Recently Played work for them too.
+  they expect (set per game), and the right stick moves a pointer for mouse-only menus, with A
+  to click (as in Insert Coin's menus) while the pointer shows. Favorites and Recently Played work for them too.
 
 ### Fixed
 - A list with a single game says "1 game", not "1 games".

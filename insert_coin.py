@@ -275,17 +275,30 @@ def flash_page(swf, title, buttons=None):
 #ptr{{position:fixed;left:0;top:0;width:0;height:0;pointer-events:none;z-index:9;display:none;
 border-left:11px solid transparent;border-right:11px solid transparent;border-bottom:26px solid #fff;
 margin-left:-11px;filter:drop-shadow(0 0 2px #000) drop-shadow(0 0 1px #000);transform-origin:50% 0;rotate:-30deg}}</style>
-<script>window.RufflePlayer = {{config: {json.dumps(cfg)}}};</script>
+<script>window.RufflePlayer = {{config: {json.dumps(cfg)}}};
+// While the pad's pointer is showing, its click button belongs to the pointer: hide that button from Ruffle (which
+// reads the pads through this same function), so a click on a menu isn't also a punch in the game.
+const icPads = navigator.getGamepads.bind(navigator);
+window.icHide = -1;
+const icMask = g => new Proxy(g, {{get: (t, k) => {{
+  if (k !== "buttons" || window.icHide < 0) {{ const v = t[k]; return typeof v === "function" ? v.bind(t) : v; }}
+  return Array.from(t.buttons, (b, i) => i !== window.icHide ? b : new Proxy(b, {{get: (bt, bk) =>
+    bk === "pressed" || bk === "touched" ? false : bk === "value" ? 0 : bt[bk]}}));
+}}}});
+navigator.getGamepads = () => Array.from(icPads(), g => g && window.icHide >= 0 ? icMask(g) : g);
+</script>
 <script src="/__ruffle__/ruffle.js"></script>
 <div id="ptr"></div>
 <script>
-// Flash menus are often mouse-only: the right stick moves a pointer and RT (or clicking the right stick) clicks.
+// Flash menus are often mouse-only: the right stick moves a pointer, and while it shows, the pad's own "select"
+// button clicks (A on Xbox pads, Cross on PlayStation, the right-hand A on Nintendo-style pads, as in Insert Coin's
+// menus). RT and clicking the right stick click too. The pointer fades 4 s after its last use; then A is the game's.
 window.addEventListener("load", () => {{
   const p = window.RufflePlayer.newest().createPlayer(), ptr = document.getElementById("ptr");
   document.body.appendChild(p);
   p.load({{url: {json.dumps(urllib.parse.quote(swf))}}}).then(() => p.focus());
   p.focus(); window.addEventListener("click", () => p.focus());
-  let x = innerWidth / 2, y = innerHeight / 2, down = false, seen = 0;
+  let x = innerWidth / 2, y = innerHeight / 2, down = false, seen = -1e9;
   const target = () => (p.shadowRoot && p.shadowRoot.querySelector("canvas")) || p;
   // Ruffle reads offsetX/Y, and Chrome works those out for page-made pointer events as if unscaled: at 2x display scaling
   // a click would land at half the distance. Measure that once per event and compensate, so any scaling works.
@@ -301,15 +314,19 @@ window.addEventListener("load", () => {{
         clientY: r.top + (y - r.top) * k, pointerId: 1, pointerType: "mouse", isPrimary: true, button: 0, buttons}}));
   }};
   (function tick() {{
-    for (const g of navigator.getGamepads ? navigator.getGamepads() : []) {{
+    const on0 = performance.now() - seen < 4000;
+    for (const g of icPads()) {{
       if (!g) continue;
+      const nin = /057e|nintendo|0583.{{0,12}}2060|snes/i.test(g.id), act = nin ? 1 : 0;   // the button that selects
       const ax = g.axes[2] || 0, ay = g.axes[3] || 0, dz = 0.2;
       if (Math.abs(ax) > dz || Math.abs(ay) > dz) {{
         const sp = 14 * Math.max(Math.abs(ax), Math.abs(ay));
         x = Math.min(innerWidth - 1, Math.max(0, x + ax * sp)); y = Math.min(innerHeight - 1, Math.max(0, y + ay * sp));
         seen = performance.now(); send("pointermove", down ? 1 : 0);
       }}
-      const b = (g.buttons[7] && g.buttons[7].value > 0.5) || (g.buttons[11] && g.buttons[11].pressed);
+      const b = (on0 && g.buttons[act] && g.buttons[act].pressed) || (down && g.buttons[act] && g.buttons[act].pressed && window.icHide === act) ||
+                (g.buttons[7] && g.buttons[7].value > 0.5) || (g.buttons[11] && g.buttons[11].pressed);
+      window.icHide = on0 || down ? act : -1;
       if (b !== down) {{ down = b; seen = performance.now(); send(b ? "pointerdown" : "pointerup", b ? 1 : 0); p.focus(); }}
       break;
     }}
