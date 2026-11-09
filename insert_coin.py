@@ -20,7 +20,7 @@ Controls (Xbox-style pad; keyboard in brackets)
 Options: --windowed   run in a window (for testing)
          --shot DIR   render sample screens to PNG files and exit (no display needed)
 """
-__version__ = "0.4.3"
+__version__ = "0.4.4"
 
 import json, os, re, sys, time, random, threading, subprocess, collections, logging, faulthandler, platform, signal, shutil
 import ctypes, fcntl, functools, http.server, urllib.parse

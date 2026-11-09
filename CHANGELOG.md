@@ -4,7 +4,7 @@ All notable changes to Insert Coin. Versions follow [semantic versioning](https:
 before 1.0, minor versions add features and patch versions fix bugs.
 Each version is also a [GitHub Release](https://github.com/Madmartigan1/insert-coin/releases).
 
-## [Unreleased]
+## [0.4.4] — 2026-11-09 · "Free play"
 
 ### Added
 - **Browser and Flash games.** Playlists of games that run in a web browser — your own HTML5
@@ -13,10 +13,13 @@ Each version is also a [GitHub Release](https://github.com/Madmartigan1/insert-c
   **Select + Start** brings you back. Flash games play through Ruffle; the pad becomes the keyboard
   and mouse they expect (keys set per game), with the right stick moving a pointer for mouse-only
   menus and A to click, as in Insert Coin's menus. The keyboard and mouse keep working alongside the
-  pad; a few Flash screens only react to the real keyboard. Favorites and Recently Played work for them too.
+  pad; a few Flash screens only react to the real keyboard. Favorites and Recently Played work for
+  them too. To play Flash games, install Ruffle as described in the README.
 
 ### Fixed
 - A list with a single game says "1 game", not "1 games".
+- If a browser game's window was left open, the next browser game no longer closes straight away:
+  the old window is closed first.
 
 ## [0.4.3] — 2026-11-04 · "Message received"
 
