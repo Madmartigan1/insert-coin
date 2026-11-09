@@ -488,6 +488,7 @@ class PageInput:
         self.out = os.fdopen(self.to_chrome[1], "wb", buffering=0)
         self.n = 0; self.session = None; self.lock = threading.Lock(); self.replies = {}; self.cv = threading.Condition()
         self.keys = set(); self.button = False; self.x = self.y = 0.0; self.w, self.h = 1280, 720; self.scale = 1.0
+        self.stats = {}                                             # key -> presses sent, and "click", for the log
         self.started = False
 
     def child_fds(self):
@@ -546,6 +547,8 @@ class PageInput:
             r = self.send("Target.attachToTarget", wait=True, targetId=page["targetId"], flatten=True) or {}
             self.session = r.get("sessionId")
             if not self.session: return False
+            # keys reach the page even when its window isn't the focused one (clicks always do; keys may not)
+            self.send("Emulation.setFocusEmulationEnabled", enabled=True)
         r = self.send("Runtime.evaluate", wait=True, returnByValue=True,
                       expression="(() => { const p = document.querySelector('ruffle-player'); return !!p && p.readyState === 2; })()") or {}
         if not (r.get("result") or {}).get("value") or not self.measure(): return False
@@ -564,6 +567,7 @@ class PageInput:
         return True
 
     def key(self, name, down):
+        if down: self.stats[name] = self.stats.get(name, 0) + 1
         k, code, vk = self.KEYS[name]
         p = dict(key=k, code=code, windowsVirtualKeyCode=vk, nativeVirtualKeyCode=vk)
         if down:
@@ -589,6 +593,7 @@ class PageInput:
                                  button="left" if self.button else "none", buttons=1 if self.button else 0)
 
     def click(self, down):
+        if down: self.stats["click"] = self.stats.get("click", 0) + 1
         if getattr(self, "moved", False):                           # the pointer's latest position first
             self.moved = False; self.send("Input.dispatchMouseEvent", type="mouseMoved", x=self.x, y=self.y, button="none", buttons=0)
         self.send("Input.dispatchMouseEvent", type="mousePressed" if down else "mouseReleased", x=self.x, y=self.y,
@@ -622,6 +627,8 @@ class FlashPad:
     STICK = {"dpad-left": (C.CONTROLLER_AXIS_LEFTX, -1), "dpad-right": (C.CONTROLLER_AXIS_LEFTX, 1),
              "dpad-up": (C.CONTROLLER_AXIS_LEFTY, -1), "dpad-down": (C.CONTROLLER_AXIS_LEFTY, 1)}
 
+    MIN_HOLD = 0.15                                                 # s: Flash games often check keys a few times a second
+
     def __init__(self, xin, buttons):
         self.xin = xin
         self.map = {b: [k for k in str(v).split("+") if k in PageInput.SYMS] for b, v in {**FLASH_BUTTONS, **(buttons or {})}.items()
@@ -654,11 +661,15 @@ class FlashPad:
             self.clicking = True; self.armed = False; self.xin.click(True)
         elif not down[sel] and self.clicking:
             self.clicking = False; self.xin.click(False)
+        now = time.time()
         for b, keys in self.map.items():
             want = down[b] and not (b == sel and self.clicking)
+            if not want and self.held.get(b + ":k") and now - self.held.get(b + ":t", 0) < self.MIN_HOLD:
+                want = True                                         # a quick tap is held long enough to be seen
             if want != bool(self.held.get(b + ":k")):
                 for k in keys: self.xin.key(k, want)
                 self.held[b + ":k"] = want
+                if want: self.held[b + ":t"] = now
             self.held[b] = down[b]
         self.xin.flush()
 
@@ -1565,7 +1576,9 @@ class App:
             self.err(f"Could not start the browser: {e}"); log.exception("Browser game failed")
         finally:
             if server: server.shutdown(); server.server_close()
-            if flashpad: flashpad.xin.close()
+            if flashpad:
+                log.info("Flash input sent: %s", ", ".join(f"{k} x{n}" for k, n in sorted(flashpad.xin.stats.items())) or "nothing")
+                flashpad.xin.close()
         took = time.time() - t0
         log.info("Browser game ended after %d min %02d s (%s, exit %s)", took // 60, took % 60,
                  "Select + Start" if quit_by_user else "browser closed", rc)
