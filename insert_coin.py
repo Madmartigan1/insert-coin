@@ -29,11 +29,7 @@ os.environ.setdefault("PYGAME_HIDE_SUPPORT_PROMPT", "1")
 import pygame
 from pygame._sdl2 import controller as sdlc
 
-HOME = os.path.expanduser("~")
-RA = f"{HOME}/.config/retroarch"
-APPDIR = f"{HOME}/.local/share/insert-coin"
-CACHE = f"{HOME}/.cache/insert-coin"
-LOGDIR = f"{os.environ.get('XDG_STATE_HOME') or HOME + '/.local/state'}/insert-coin"
+from paths import RA, APPDIR, CACHE, LOGDIR, CONFDIR
 log = logging.getLogger("insert-coin")
 
 
@@ -131,7 +127,6 @@ SETUP_STEPS = [("up", "up", "Up", False), ("down", "down", "Down", False), ("lef
                ("right", "right", "Right", False), ("a", "A", "Select / play", False), ("b", "B", "Back", False),
                ("y", "Y", "Favorite", True), ("x", "X", "Other versions", True),
                ("lb", "LB", "Previous letter", True), ("rb", "RB", "Next letter", True)]
-CONFDIR = os.environ.get("INSERT_COIN_CONFIG") or os.path.expanduser("~/.config/insert-coin")
 
 
 def quit_combo(style, name="", guid=""):

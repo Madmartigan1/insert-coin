@@ -72,7 +72,8 @@ somewhere temporary.
 
 ## Code guidelines
 
-- **Single file, few dependencies.** The app is `insert_coin.py`; its only third-party
+- **Few files, few dependencies.** The app is `insert_coin.py` (menus) and `engine.py` (built-in
+  player); every file and folder they use is defined once in `paths.py`. The only third-party
   dependency is pygame-ce. `sync_thumbnails.py` uses only the Python standard library.
   Please discuss before adding dependencies.
 - **Python 3.10+**, standard library first.

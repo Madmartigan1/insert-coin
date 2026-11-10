@@ -11,7 +11,7 @@ the shared "MAME" thumbnail folder, like RetroArch does.
 """
 import json, os, re, sys, glob, html, urllib.parse, urllib.request, concurrent.futures as cf
 import time
-RA = os.path.expanduser("~/.config/retroarch"); S = os.path.expanduser("~/.cache/retroarch-thumb-sync")
+from paths import RA, THUMB_SYNC_CACHE as S
 BASE = "https://thumbnails.libretro.com"; TYPES = ["Named_Boxarts", "Named_Snaps", "Named_Titles"]
 DRY = "--dry" in sys.argv
 os.makedirs(f"{S}/idx", exist_ok=True)

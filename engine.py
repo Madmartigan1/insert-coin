@@ -25,13 +25,7 @@ import pygame
 from pygame._sdl2 import controller as sdlc
 from pygame._sdl2 import audio as sdla
 
-HOME = os.path.expanduser("~")
-RA = f"{HOME}/.config/retroarch"
-APPDIR = f"{HOME}/.local/share/insert-coin"
-SAVES = os.environ.get("INSERT_COIN_SAVES") or f"{APPDIR}/saves"      # override for tests
-# BIOS files: Insert Coin's own folder once it has one, else the one RetroArch uses (Neo Geo BIOS lives there)
-SYSTEM = f"{APPDIR}/system" if os.path.isdir(f"{APPDIR}/system") else f"{RA}/system"
-CONFDIR = os.environ.get("INSERT_COIN_CONFIG") or f"{HOME}/.config/insert-coin"
+from paths import RA, APPDIR, SAVES, SYSTEM, CONFDIR
 W, H = 1920, 1080
 
 def split_archive(path):
