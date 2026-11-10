@@ -17,4 +17,5 @@ CONFDIR = os.environ.get("INSERT_COIN_CONFIG") or f"{HOME}/.config/insert-coin"
 SAVES = os.environ.get("INSERT_COIN_SAVES") or f"{APPDIR}/saves"
 # BIOS files: Insert Coin's own folder once it has one, else the one RetroArch uses (Neo Geo BIOS lives there)
 SYSTEM = f"{APPDIR}/system" if os.path.isdir(f"{APPDIR}/system") else f"{RA}/system"
+HERE = os.path.dirname(os.path.abspath(__file__))                    # the folder with insert_coin.py and engine.py
 THUMB_SYNC_CACHE = f"{HOME}/.cache/retroarch-thumb-sync"              # sync_thumbnails.py's download cache

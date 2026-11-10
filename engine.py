@@ -25,6 +25,8 @@ import pygame
 from pygame._sdl2 import controller as sdlc
 from pygame._sdl2 import audio as sdla
 
+if os.path.dirname(os.path.abspath(__file__)) not in sys.path:     # also when loaded with runpy (docs/make_screenshots.py)
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from paths import RA, APPDIR, SAVES, SYSTEM, CONFDIR
 W, H = 1920, 1080
 
@@ -748,8 +750,7 @@ class Player:
 
 
 try:                                                         # reuse Insert Coin's controller-family detection
-    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-    from insert_coin import controller_style
+    from insertcoin.controllers import controller_style
 except Exception:
     controller_style = None
 

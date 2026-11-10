@@ -72,8 +72,10 @@ somewhere temporary.
 
 ## Code guidelines
 
-- **Few files, few dependencies.** The app is `insert_coin.py` (menus) and `engine.py` (built-in
-  player); every file and folder they use is defined once in `paths.py`. The only third-party
+- **Small modules, few dependencies.** `insert_coin.py` starts the app; the code lives in the
+  `insertcoin/` package, one module per job (listed in `insertcoin/__init__.py`): the library,
+  the screens, controllers, launching games, browser games and so on. `engine.py` is the built-in
+  player. Every file and folder they use is defined once in `paths.py`. The only third-party
   dependency is pygame-ce. `sync_thumbnails.py` uses only the Python standard library.
   Please discuss before adding dependencies.
 - **Python 3.10+**, standard library first.
@@ -91,7 +93,7 @@ somewhere temporary.
 1. Fork the repository and create a branch: `git checkout -b fix/short-description`.
 2. Make focused commits with clear messages (what changed and why).
 3. Make sure both scripts still start:
-   `python3 -c "import ast; ast.parse(open('insert_coin.py').read())"`, and render the
+   `python3 -m compileall -q insert_coin.py engine.py paths.py insertcoin`, and render the
    screenshots with `--shot`.
 4. Update `README.md` if you change controls, options, requirements or files written.
 5. Open a pull request describing the change, how you tested it, and screenshots for UI changes.
@@ -100,7 +102,7 @@ somewhere temporary.
 
 Insert Coin uses [semantic versioning](https://semver.org/): `MAJOR.MINOR.PATCH`.
 Before 1.0, minor versions (0.2, 0.3, …) may add features and change behaviour;
-patch versions (0.1.1, …) are fixes only. The version lives in `__version__` in `insert_coin.py`.
+patch versions (0.1.1, …) are fixes only. The version lives in `__version__` in `insertcoin/__init__.py`.
 Every release gets an entry in [CHANGELOG.md](CHANGELOG.md).
 
 ## License
