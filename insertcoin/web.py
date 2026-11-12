@@ -60,33 +60,28 @@ def load_web_playlists():
 # ---------------------------------------------------------------- browser games: local server, browser, pad watch
 RUFFLE = f"{APPDIR}/ruffle"                                         # Ruffle's self-hosted web build: plays Flash (.swf)
 FLASH_PAGE = "__insert_coin_flash__.html"
-# Flash games only know the keyboard: pad button -> key(s) it presses (Ruffle's names; overridable per game with
-# "buttons"; "X+Space" presses both)
+# Flash games only know the keyboard: pad button -> the key it presses (Ruffle's names; overridable per game with
+# "buttons"; Ruffle presses one key per button, so of "X+Space" only X is used here)
 FLASH_BUTTONS = {"dpad-up": "Up", "dpad-down": "Down", "dpad-left": "Left", "dpad-right": "Right",
                  "south": "Space", "east": "Enter", "west": "Z", "north": "X", "start": "Enter"}
 PAD_INDEX = {"south": 0, "east": 1, "west": 2, "north": 3, "left-trigger": 4, "right-trigger": 5, "select": 8, "start": 9,
              "dpad-up": 12, "dpad-down": 13, "dpad-left": 14, "dpad-right": 15}      # the browser's standard layout
 KEYCODES = {"Up": 38, "Down": 40, "Left": 37, "Right": 39, "Space": 32, "Enter": 13, "Shift": 16, "Ctrl": 17,
             "Alt": 18, "Tab": 9, "Escape": 27, "Backspace": 8, **{c: ord(c) for c in "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"}}
-KEYNAMES = {"Up": ("ArrowUp", "ArrowUp"), "Down": ("ArrowDown", "ArrowDown"), "Left": ("ArrowLeft", "ArrowLeft"),
-            "Right": ("ArrowRight", "ArrowRight"), "Space": (" ", "Space"), "Enter": ("Enter", "Enter"),
-            "Shift": ("Shift", "ShiftLeft"), "Ctrl": ("Control", "ControlLeft"), "Alt": ("Alt", "AltLeft"),
-            "Tab": ("Tab", "Tab"), "Escape": ("Escape", "Escape"), "Backspace": ("Backspace", "Backspace"),
-            **{c: (c.lower(), "Key" + c) for c in "ABCDEFGHIJKLMNOPQRSTUVWXYZ"}, **{c: (c, "Digit" + c) for c in "0123456789"}}
 
 
 def flash_page(swf, title, buttons=None, native=False):
     """A full-screen page that plays one .swf with Ruffle, the pad's buttons pressing the keys the game uses.
 
-    Ruffle presses the keys for most buttons itself. The page handles the pad's select button (A on Xbox pads, Cross
-    on PlayStation, the right-hand A on Nintendo-style pads, as in Insert Coin's menus) and any button set to several
-    keys: many Flash menus are mouse-only, so the right stick moves a pointer and, while it shows, that button
-    clicks; otherwise it presses its keys. Any other button hides the pointer at once, so it never gets in the way.
+    Ruffle presses the key for every button itself (its gamepadButtonMapping). The page never sends keys: on the
+    user's screen page-made keys stopped reaching games (2026-11-10), while Ruffle's own mapping kept working.
+    Many Flash menus are mouse-only, so the right stick moves a pointer and, while it shows, the pad's select button
+    (A on Xbox pads, Cross on PlayStation, the right-hand A on Nintendo-style pads, as in Insert Coin's menus) also
+    clicks. Any other button hides the pointer at once, so it never gets in the way.
     native=True: Insert Coin sends real keys and mouse input itself (FlashPad), so the page leaves the pad alone."""
     keys = lambda v: [k for k in str(v).split("+") if k in KEYCODES]
     mapping = {b: keys(v) for b, v in {**FLASH_BUTTONS, **(buttons or {})}.items() if b in PAD_INDEX}
-    ev = lambda k: {"key": KEYNAMES[k][0], "code": KEYNAMES[k][1], "keyCode": KEYCODES[k]}
-    page = {name: [ev(k) for k in ks] for name, ks in mapping.items()}      # all buttons, for the page's own handling
+    ruffle_map = {name: KEYCODES[ks[0]] for name, ks in mapping.items() if ks}   # Ruffle: one key per button
     cfg = {"autoplay": "on", "unmuteOverlay": "hidden", "splashScreen": False, "letterbox": "on", "contextMenu": "off",
            "showSwfDownload": False}
     esc = lambda x: x.replace("&", "&amp;").replace("<", "&lt;")
@@ -96,15 +91,11 @@ def flash_page(swf, title, buttons=None, native=False):
 border-left:11px solid transparent;border-right:11px solid transparent;border-bottom:26px solid #fff;
 margin-left:-11px;filter:drop-shadow(0 0 2px #000) drop-shadow(0 0 1px #000);transform-origin:50% 0;rotate:-30deg}}</style>
 <script>
-const MAP = {json.dumps(page)}, INDEX = {json.dumps(PAD_INDEX)}, NATIVE = {json.dumps(bool(native))};
+const INDEX = {json.dumps(PAD_INDEX)}, NATIVE = {json.dumps(bool(native))};
 // The select button depends on the pad (as in Insert Coin's menus); the browser's layout is by position.
 const selectButton = id => /057e|nintendo|0583.{{0,12}}2060|snes/i.test(id) ? "east" : "south";
-const mineFor = id => {{ const m = new Set([selectButton(id)]);
-  for (const [b, ks] of Object.entries(MAP)) if (ks.length > 1) m.add(b); return m; }};
-// Ruffle presses the keys for the buttons the page doesn't handle; set once the first pad is seen.
-window.RufflePlayer = {{config: {json.dumps(cfg)}}};
-const ruffleMapping = id => {{ const out = {{}}, mine = mineFor(id); if (NATIVE) return out;
-  for (const [b, ks] of Object.entries(MAP)) if (!mine.has(b) && ks.length) out[b] = ks[0].keyCode; return out; }};
+// Ruffle presses the key for every button (none when Insert Coin sends real input itself).
+window.RufflePlayer = {{config: {{...{json.dumps(cfg)}, gamepadButtonMapping: NATIVE ? {{}} : {json.dumps(ruffle_map)}}}}};
 </script>
 <script src="/__ruffle__/ruffle.js"></script>
 <div id="ptr"></div>
@@ -113,14 +104,9 @@ window.addEventListener("load", () => {{
   const pads = () => [...(navigator.getGamepads ? navigator.getGamepads() : [])].filter(Boolean);
   const ptr = document.getElementById("ptr");
   let p = null;
-  const start = id => {{                         // the player, with Ruffle's button mapping for this pad
-    window.RufflePlayer.config.gamepadButtonMapping = ruffleMapping(id);
-    p = window.RufflePlayer.newest().createPlayer(); document.body.appendChild(p);
-    p.load({{url: {json.dumps(urllib.parse.quote(swf))}}}).then(() => p.focus());
-    p.focus(); window.addEventListener("click", () => p.focus());
-  }};
-  // (browsers only list a pad once it's been used on the page, so this is usually the standard layout: A / Cross)
-  start((pads()[0] || {{}}).id || "");
+  p = window.RufflePlayer.newest().createPlayer(); document.body.appendChild(p);
+  p.load({{url: {json.dumps(urllib.parse.quote(swf))}}}).then(() => p.focus());
+  p.focus(); window.addEventListener("click", () => p.focus());
   const target = () => (p && p.shadowRoot && p.shadowRoot.querySelector("canvas")) || p;
   // Ruffle reads offsetX/Y, and Chrome works those out for page-made pointer events as if unscaled: at 2x display
   // scaling a click would land at half the distance. Measure that per event and compensate, so any scaling works.
@@ -131,8 +117,6 @@ window.addEventListener("load", () => {{
     const r = c.getBoundingClientRect(), k = scale(c, r);
     c.dispatchEvent(new PointerEvent(type, {{bubbles: true, composed: true, clientX: r.left + (x - r.left) * k,
         clientY: r.top + (y - r.top) * k, pointerId: 1, pointerType: "mouse", isPrimary: true, button: 0, buttons}})); }};
-  const key = (type, k) => p && p.dispatchEvent(new KeyboardEvent(type, {{key: k.key, code: k.code, keyCode: k.keyCode,
-      which: k.keyCode, bubbles: true, composed: true}}));
   // armed: the pointer was moved since its last click, so the select button clicks; after a click it goes back to
   // the game ("press space to continue" right after choosing a menu item) until the pointer is moved again.
   let x = innerWidth / 2, y = innerHeight / 2, shown = -1e9, armed = false, prev = {{}}, held = {{}};
@@ -143,7 +127,7 @@ window.addEventListener("load", () => {{
   (function tick() {{
     const g = pads()[0];
     if (g && p && !NATIVE) {{
-      const mine = mineFor(g.id), sel = selectButton(g.id), now = performance.now();
+      const sel = selectButton(g.id), now = performance.now();
       const ax = g.axes[2] || 0, ay = g.axes[3] || 0, dz = 0.2;
       if (Math.abs(ax) > dz || Math.abs(ay) > dz) {{                // the right stick moves the pointer
         const sp = 14 * Math.max(Math.abs(ax), Math.abs(ay));
@@ -152,18 +136,12 @@ window.addEventListener("load", () => {{
       }}
       const on = i => !!(g.buttons[i] && (g.buttons[i].pressed || g.buttons[i].value > 0.5));
       // pressing anything for the game (D-pad, other buttons) puts the pointer away straight away
-      for (const [b, i] of Object.entries(INDEX)) if (b !== sel && on(i) && !prev[i] && !mine.has(b)) {{ shown = -1e9; armed = false; }}
+      for (const [b, i] of Object.entries(INDEX)) if (b !== sel && on(i) && !prev[i]) {{ shown = -1e9; armed = false; }}
       const pointing = armed && now - shown < 3000;
       // RT / right-stick click always click; the select button clicks while the pointer shows
       const clickNow = on(7) || on(11) || (on(INDEX[sel]) && (pointing || held.click === "sel"));
       if (clickNow && !held.click) {{ held.click = on(INDEX[sel]) && pointing ? "sel" : "rt"; shown = now; armed = false; mouse("pointerdown", 1); p.focus(); }}
       else if (!clickNow && held.click) {{ held.click = null; shown = now; mouse("pointerup", 0); }}
-      // the page's own buttons press their keys (when not clicking)
-      for (const b of mine) {{
-        const i = INDEX[b], down = on(i) && !(b === sel && held.click === "sel");
-        if (down && !held[b]) {{ held[b] = true; for (const k of MAP[b] || []) key("keydown", k); }}
-        else if (!down && held[b]) {{ held[b] = false; for (const k of MAP[b] || []) key("keyup", k); }}
-      }}
       for (const i of Object.values(INDEX)) prev[i] = on(i);
     }}
     if (NATIVE) {{ x = nx; y = ny; shown = nshown; armed = true; }}
