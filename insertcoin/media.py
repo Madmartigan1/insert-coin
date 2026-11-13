@@ -1,5 +1,6 @@
 """Images (loaded off the main thread), fonts and menu sounds."""
 import collections, os, pygame, threading, time
+from insertcoin.logs import log
 
 
 # ---------------------------------------------------------------- images: loaded & scaled off the main thread
@@ -25,7 +26,7 @@ class Images:
             s = min(w / iw, h / ih); size = (max(1, int(iw * s)), max(1, int(ih * s)))
             return pygame.transform.smoothscale(img, size)
         if mode == "blur":                                         # cover the screen, cheap blur
-            s = max(w / iw, h / ih); cw, ch = int(iw * s), int(ih * s)
+            s = max(w / iw, h / ih); cw, ch = max(w, int(iw * s)), max(h, int(ih * s))       # never 1 px short
             small = pygame.transform.smoothscale(img, (max(1, cw // 12), max(1, ch // 12)))
             big = pygame.transform.smoothscale(small, (cw, ch))
             return big.subsurface(((cw - w) // 2, (ch - h) // 2, w, h)).copy()
@@ -36,7 +37,10 @@ class Images:
             with self.cv:
                 while not self.want: self.cv.wait()
                 key = self.want.pop()                              # newest request first
-            surf = self._make(key)
+            try:
+                surf = self._make(key)
+            except Exception:                                      # a bad image must never stop the loader
+                log.exception("Could not load image %s", key[0]); surf = None
             self.done.append((key, surf))
 
     def get(self, path, w, h, mode="fit"):
