@@ -150,7 +150,10 @@ def main():
     app.gi[app.sys["id"]] = next(k for k, g in enumerate(app.games()) if g.title == "Ember Quest")
     app.gpos = float(app.cur_gi()); save("games")
     app.open_versions(); app.vsel = 1; save("versions"); app.screen_mode = "games"
-    app.si = 0; app.spos = 0.0; app.screen_mode = "games"; app.gpos = 0.0; save("favorites")
+    go_system("favorites"); app.screen_mode = "games"; app.gpos = 0.0; save("favorites")
+    app.screen_mode = "systems"; app.open_search(); app.kpos = (3, 6)
+    for ch in "comet": app.type_key(ch)
+    save("search"); app.screen_mode = "systems"
     app.screen_mode = "systems"; go_system("Pixel Forge - 32-Bit Disc System"); app.screen_mode = "quit"; app.quit_sel = 1; save("menu")
     # the built-in player's pause menu, over a demo game's picture
     eng = runpy.run_path(os.path.join(HERE, "..", "engine.py"), run_name="engine_demo")

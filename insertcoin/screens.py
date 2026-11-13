@@ -4,7 +4,7 @@ from insertcoin.systems import FRIENDLY
 from insertcoin.controllers import GLYPHS, QUIT_COMBO, SETUP_STEPS
 from insertcoin.names import split_archive, tags
 from insertcoin.web import WebGame
-from insertcoin.draw import H, W, n_games, rrect, shade, star, text, wrap
+from insertcoin.draw import H, W, magnifier, n_games, rrect, shade, star, text, wrap
 class Screens:
 
     # -- drawing
@@ -107,6 +107,7 @@ class Screens:
             tile = pygame.Surface((w, h), pygame.SRCALPHA)
             rrect(tile, shade(sy["color"], 0.5), tile.get_rect(), 26)
             g3 = sy["games"][:: max(1, len(sy["games"]) // 3)][:3] if sy["special"] else random.Random(sy["id"]).sample(sy["games"], min(3, len(sy["games"])))
+            if sy["special"] == "search" and not sy["games"]: magnifier(tile, (w * 0.5, h * 0.36), 70 * sc)
             for j, g in enumerate(g3):                                     # a little fan of box art
                 im = self.img.get(g.thumb("Named_Boxarts"), 190 * sc, 230 * sc)
                 if im:
@@ -117,7 +118,8 @@ class Screens:
                 pygame.draw.line(grad, (*shade(sy["color"], 0.25), int(235 * yy / (h * 0.45))), (0, yy), (w, yy))
             tile.blit(grad, (0, h * 0.55))
             text(tile, self.fonts(int(46 * sc), True), sy["name"], (26 * sc, h - 98 * sc), maxw=w - 40)
-            text(tile, self.fonts(int(24 * sc)), f"{sy['maker']}  ·  {n_games(len(sy['games']))}", (28 * sc, h - 42 * sc), (215, 220, 230), maxw=w - 40)
+            sub = sy["maker"] if sy["special"] == "search" and not sy["games"] else f"{sy['maker']}  ·  {n_games(len(sy['games']))}"
+            text(tile, self.fonts(int(24 * sc)), sub, (28 * sc, h - 42 * sc), (215, 220, 230), maxw=w - 40)
             mask = pygame.Surface((w, h), pygame.SRCALPHA); rrect(mask, (255, 255, 255, 255), mask.get_rect(), 26)
             tile.blit(mask, (0, 0), special_flags=pygame.BLEND_RGBA_MIN)
             if ad > 0.5: tile.set_alpha(int(255 * max(0.35, 1 - 0.3 * ad)))
@@ -127,7 +129,7 @@ class Screens:
         for i in range(n):
             pygame.draw.circle(self.screen, (255, 255, 255) if i == self.si else (110, 115, 130), (x0 + i * 22 + 11, 790), 6 if i == self.si else 4)
         text(self.screen, self.fonts(30), s["maker"] if s["special"] else n_games(len(s['games'])), (W / 2, 850), (210, 215, 228), anchor="midtop")
-        if hints: self.draw_hints([("a", "Open"), ("b", "Power")])
+        if hints: self.draw_hints([("a", "Open"), ("b", "Power")] + ([("r3", "Search")] if self.style != "generic" else []))
 
     def draw_games(self, hints=True):
         s = self.sys; gs = self.games(); i = self.cur_gi(); g = gs[i] if gs else None
@@ -223,6 +225,48 @@ class Screens:
                  anchor="midright", shadow=False, maxw=260)
         self.draw_hints([("a", "Play"), ("b", "Back")])
 
+    def draw_search(self):
+        """The on-screen keyboard, what's typed, and the games it finds so far."""
+        color = (120, 110, 210)
+        self.draw_background(color, self.preview[0] if self.preview else None)
+        kb = self.style == "keyboard"
+        self.draw_header("Search", "Type on your keyboard" if kb else "Type a word from the game's name")
+        box = pygame.Rect(120, 170, 1060, 96)
+        rrect(self.screen, (236, 238, 245), box, 22)
+        f = self.fonts(46, True)
+        if self.q:
+            r = text(self.screen, f, self.q, (box.left + 34, box.centery), (20, 22, 30), anchor="midleft", shadow=False, maxw=980)
+            if int(time.time() * 2) % 2: pygame.draw.rect(self.screen, (20, 22, 30), (r.right + 4, box.centery - 26, 4, 52))
+        else:
+            text(self.screen, self.fonts(40), "for example: knight", (box.left + 34, box.centery), (140, 145, 160), anchor="midleft", shadow=False)
+        x0, y, kw, gap = box.left, 320, 94, 10
+        for row, keys in enumerate(self.KEYS):
+            wide = isinstance(keys, tuple)
+            w = (box.width - gap * (len(keys) - 1)) / len(keys) if wide else kw
+            x = x0 + (box.width - (len(keys) * (w + gap) - gap)) / 2
+            for col, k in enumerate(keys):
+                r = pygame.Rect(round(x), y, round(w), 88)
+                on = not kb and (row, col) == (self.kpos[0], min(self.kpos[1], len(keys) - 1))
+                rrect(self.screen, (236, 238, 245) if on else (48, 51, 68), r, 16)
+                if not on: rrect(self.screen, (80, 85, 105), r, 16, 2)
+                text(self.screen, self.fonts(36 if not wide else 32, True), k, r.center, (20, 22, 30) if on else (235, 237, 245),
+                     anchor="center", shadow=False)
+                x += w + gap
+            y += 88 + 14
+        # what it finds so far
+        px, py = 1270, 180
+        n = len(self.preview)
+        head = n_games(n) if n else ("No games match" if self.q.strip() else "Games appear as you type")
+        text(self.screen, self.fonts(34, True), head, (px, py))
+        for k, g in enumerate(self.preview[:9]):
+            yy = py + 70 + k * 74
+            text(self.screen, self.fonts(28, True), g.title, (px, yy), maxw=600)
+            sysname = FRIENDLY.get(g.system, (g.system,))[0]
+            text(self.screen, self.fonts(22), sysname, (px, yy + 36), (175, 180, 200), maxw=600)
+        if n > 9: text(self.screen, self.fonts(24), f"and {n - 9:,} more", (px, py + 70 + 9 * 74), (175, 180, 200))
+        self.draw_hints([("a", "Search"), ("b", "Back")] if kb else
+                        [("a", "Type"), ("x", "Delete"), ("y", "Space"), ("b", "Back")])
+
     @property
     def POWER_MENU(self):
         return ("Resume", f"Sound: {'On' if self.sfx.enabled else 'Off'}",
@@ -299,10 +343,10 @@ class Screens:
         if not self.lib.systems:
             return self.draw_empty()
         {"systems": self.draw_systems, "games": self.draw_games, "quit": self.draw_quit,
-         "versions": self.draw_versions}[self.screen_mode]()
+         "versions": self.draw_versions, "search": self.draw_search}[self.screen_mode]()
         if self.toast and time.time() < self.toast[1]:
             f = self.fonts(30); w = f.size(self.toast[0])[0] + 60
-            r = pygame.Rect(0, 0, w, 64); r.midtop = (W / 2, H - 150 if self.screen_mode == "quit" else 150)   # clear of the menu
+            r = pygame.Rect(0, 0, w, 64); r.midtop = (W / 2, H - 150 if self.screen_mode in ("quit", "search") else 150)   # clear of the menu
             box = pygame.Surface(r.size, pygame.SRCALPHA); rrect(box, (0, 0, 0, 200), box.get_rect(), 32); self.screen.blit(box, r)
             text(self.screen, f, self.toast[0], r.center, anchor="center", shadow=False)
 

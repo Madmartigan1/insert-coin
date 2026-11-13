@@ -21,7 +21,7 @@ class OnePerGame(unittest.TestCase):
 
     def test_systems_in_order_and_empty_ones_hidden(self):
         ids = [s["id"] for s in self.lib.systems]
-        self.assertEqual(ids, [S.ARCADE, S.NES, "Homebrew - Console"])     # known systems first, unknown last
+        self.assertEqual(ids, ["search", S.ARCADE, S.NES, "Homebrew - Console"])   # Search, known systems, unknown last
         nes = system(self.lib, S.NES)
         self.assertEqual((nes["name"], nes["maker"]), ("NES", "Nintendo"))
         other = system(self.lib, "Homebrew - Console")

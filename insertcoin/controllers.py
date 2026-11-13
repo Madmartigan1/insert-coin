@@ -27,13 +27,17 @@ def controller_style(name, guid=""):
 # action -> how its button looks, per style. kinds: letter (round button), shape (PlayStation symbol), pill, key
 GLYPHS = {
     "xbox": {"a": ("letter", "A", (90, 190, 90)), "b": ("letter", "B", (220, 80, 70)),
-             "y": ("letter", "Y", (230, 190, 50)), "x": ("letter", "X", (70, 130, 230)), "lbrb": ("pill", "LB RB", (120, 130, 150))},
+             "y": ("letter", "Y", (230, 190, 50)), "x": ("letter", "X", (70, 130, 230)), "lbrb": ("pill", "LB RB", (120, 130, 150)),
+             "r3": ("pill", "R3", (120, 130, 150))},
     "playstation": {"a": ("shape", "cross", (120, 160, 245)), "b": ("shape", "circle", (235, 90, 95)),
-                    "y": ("shape", "triangle", (70, 200, 160)), "x": ("shape", "square", (230, 130, 200)), "lbrb": ("pill", "L1 R1", (120, 130, 150))},
+                    "y": ("shape", "triangle", (70, 200, 160)), "x": ("shape", "square", (230, 130, 200)), "lbrb": ("pill", "L1 R1", (120, 130, 150)),
+                    "r3": ("pill", "R3", (120, 130, 150))},
     "nintendo": {"a": ("letter", "A", (110, 116, 132)), "b": ("letter", "B", (110, 116, 132)),
-                 "y": ("letter", "Y", (110, 116, 132)), "x": ("letter", "X", (110, 116, 132)), "lbrb": ("pill", "L R", (120, 130, 150))},
+                 "y": ("letter", "Y", (110, 116, 132)), "x": ("letter", "X", (110, 116, 132)), "lbrb": ("pill", "L R", (120, 130, 150)),
+                 "r3": ("pill", "R3", (120, 130, 150))},
     "keyboard": {"a": ("key", "Enter", None), "b": ("key", "Esc", None),
-                 "y": ("key", "F", None), "x": ("key", "V", None), "lbrb": ("key", "PgUp PgDn", None)},
+                 "y": ("key", "F", None), "x": ("key", "V", None), "lbrb": ("key", "PgUp PgDn", None),
+                 "r3": ("key", "/", None)},
 }
 GLYPHS["snes"] = dict(GLYPHS["nintendo"])                        # replicas: same printed letters as Nintendo
 GLYPHS["generic"] = {"a": ("letter", "A", (110, 116, 132)), "b": ("letter", "B", (110, 116, 132)),   # set-up pads

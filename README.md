@@ -54,12 +54,17 @@ vice versa.
 ## Features
 
 - **System carousel** — every RetroArch playlist as a tile with a fan of its box art.
-  *Favorites* and *Recently Played* come first. Systems get friendly names
+  *Search*, *Favorites* and *Recently Played* come first. Systems get friendly names
   ("Super Nintendo" instead of "Nintendo - Super Nintendo Entertainment System"), and empty
   playlists are hidden.
 - **Game carousel** — large box art in the middle, the selected game's in-game snapshot blurred
   behind it, and its title screen in a side panel. Year and publisher are shown where
   RetroArch's databases know them. Games without artwork get a clean name card.
+- **Search** — the *Search* tile on the home screen, or **R3** (click the right stick) anywhere in the
+  menus, opens an on-screen keyboard. Type part of a name and the matching games from every system
+  appear as you type: "ninja" finds every game with that word in its name, "nin gai" narrows it
+  down, and numbers match Roman numerals ("2" finds "II"). The results open as a list you can play
+  from, and stay on the Search tile.
 - **Favorites** — press **Y** on any game to add or remove it.
 - **Jump by letter** — **LB / RB** skip through long lists alphabetically.
 - **One entry per game** — the same game copied into several folders is shown once, and its
@@ -90,13 +95,13 @@ vice versa.
 | | |
 |---|---|
 | ![Home screen: a carousel of systems, each with a fan of its box art](docs/screenshots/home.png) | ![Favorites, shared with RetroArch's own favorites list](docs/screenshots/favorites.png) |
-| **Home** — every system, plus Favorites and Recently Played | **Favorites** — press Y on any game |
+| **Home** — every system, plus Search, Favorites and Recently Played | **Favorites** — press Y on any game |
 | ![The Versions list: one game in five versions, the best one first](docs/screenshots/versions.png) | ![The built-in player's pause menu: Resume, Controls, Quit game](docs/screenshots/game_menu.png) |
 | **Versions** — X on a game with more than one | **Game menu** — Select + Start in the built-in player |
 | ![The built-in player's Controls screen: each game button with the controller button that does it](docs/screenshots/game_controls.png) | ![The menu: Resume, Sound, Player, Games, Set up controller, Exit Insert Coin](docs/screenshots/menu.png) |
 | **Controls** — this game's buttons, in the built-in player | **Menu** — B on the home screen |
-| ![Controller set-up: press the button you want for each action](docs/screenshots/controller_setup.png) | |
-| **Controller set-up** — for pads that aren't recognised | |
+| ![Search: an on-screen keyboard, with the matching games listed as you type](docs/screenshots/search.png) | ![Controller set-up: press the button you want for each action](docs/screenshots/controller_setup.png) |
+| **Search** — R3, or the Search tile on the home screen | **Controller set-up** — for pads that aren't recognised |
 
 Button hints follow the controller in your hand — Xbox, PlayStation, Switch / SNES-style, or keyboard:
 
@@ -114,6 +119,12 @@ Button hints follow the controller in your hand — Xbox, PlayStation, Switch / 
 | **Y** | F | Add / remove favorite |
 | **X** | V | Versions — choose a region, revision or translation (games with more than one) |
 | **LB / RB** | Page Up / Page Down | Previous / next letter |
+| **R3** (click the right stick) | / | Search |
+
+**On the search screen:** the D-pad or left stick moves over the keyboard, **A** types a letter,
+**X** deletes one, **Y** adds a space, **Start** (or the on-screen *Search* key) shows the games
+found, and **B** goes back. With a keyboard, just type: Backspace deletes, Enter searches, Esc goes
+back. From the results, **B** returns to the keyboard with your words still there.
 
 **The menu** (**B** on the home screen):
 

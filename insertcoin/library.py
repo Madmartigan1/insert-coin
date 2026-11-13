@@ -6,7 +6,7 @@ Nothing here reads RetroArch's files directly."""
 import collections, json, os, re, time
 from paths import APPDIR, CONFDIR
 from insertcoin.systems import FRIENDLY, ORDER
-from insertcoin.names import REGION_RANK, rom_stem, tags, title_key
+from insertcoin.names import REGION_RANK, ROMAN, rom_stem, tags, title_key
 from insertcoin.games import Game
 from insertcoin.retroarch import RetroArch, read_json
 from insertcoin.web import WebGame, load_web_playlists
@@ -63,6 +63,7 @@ class Library:
         self.source = source or RetroArch()                         # where the games, favorites and history come from
         self.hidden = 0                                             # duplicate copies not shown
         self.systems = []          # list of dicts: id, name, maker, color, games, special
+        self.query, self.results, self._index = "", [], None        # the last search and its games
         self.load()
 
     def load(self):
@@ -130,11 +131,40 @@ class Library:
             if k not in seen: seen.add(k); rec.append(g)
         if st: rec = self._web_recent(rec, st)
         specials = []
+        if any(not s["special"] for s in self.systems): specials.append(self.search_tile())
         if fav: specials.append({"id": "favorites", "name": "Favorites", "maker": "Your picks", "color": (230, 180, 40), "games": fav, "special": "fav"})
         if rec: specials.append({"id": "recent", "name": "Recently Played", "maker": "Pick up where you left off", "color": (60, 170, 200), "games": rec[:60], "special": "recent"})
         self.systems = specials + self.systems
         self.fav_paths, self.fav_keys = self.source.favorite_marks()
         self.web_favs = set(st["favorites"]) if st else set()
+
+    # -- search: every game with the typed words in its name, from every system
+    def search(self, query):
+        """Games whose name has every typed word at the start of one of its words ("nin gai" finds "Ninja Gaiden";
+        Roman numerals and numbers match each other, "2" finds "II"), A-Z, from every system and browser playlist."""
+        words = re.findall(r"[a-z0-9]+", query.lower())
+        if not words: return []
+        if self._index is None:
+            self._index = []
+            for s in self.systems:
+                if s["special"]: continue
+                for g in s["games"]:
+                    raw = re.findall(r"[a-z0-9]+", g.title.lower())
+                    self._index.append((g, raw, {ROMAN.get(w, w) for w in raw}))
+        hit = lambda q, raw, num: any(w.startswith(q) for w in raw) or ROMAN.get(q, q) in num
+        found = [g for g, raw, num in self._index if all(hit(q, raw, num) for q in words)]
+        return sorted(found, key=lambda g: (g.key, ORDER.get(g.system, 99)))
+
+    def set_search(self, query):
+        """Search, and keep the result on the home screen's Search tile; returns the games found."""
+        self.query, self.results = query.strip(), self.search(query)
+        self.systems = [self.search_tile() if s["id"] == "search" else s for s in self.systems]
+        return self.results
+
+    def search_tile(self):
+        maker = f"\u201c{self.query}\u201d" if self.query else "Find any game by name"
+        return {"id": "search", "name": f"Search: {self.query}" if self.query else "Search", "maker": maker,
+                "color": (120, 110, 210), "games": self.results, "special": "search"}
 
     def is_fav(self, g):
         """A favorite, whichever copy of the game was starred."""

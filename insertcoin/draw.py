@@ -38,6 +38,13 @@ def star(surf, center, r, color=(255, 210, 60)):
     pygame.draw.polygon(surf, color, pts)
 
 
+def magnifier(surf, center, r, color=(255, 255, 255)):
+    """A magnifying glass: the Search tile's picture."""
+    cx, cy = center
+    pygame.draw.circle(surf, color, (cx - r * 0.15, cy - r * 0.15), r * 0.62, max(3, int(r * 0.16)))
+    pygame.draw.line(surf, color, (cx + r * 0.3, cy + r * 0.3), (cx + r * 0.85, cy + r * 0.85), max(4, int(r * 0.24)))
+
+
 def n_games(n):
     return f"{n:,} game" + ("" if n == 1 else "s")
 
