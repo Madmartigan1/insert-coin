@@ -1,4 +1,4 @@
-"""The systems Insert Coin knows: friendly names, makers, colours, and the cores the built-in player runs."""
+"""The systems Insert Coin knows: friendly names, makers and colours. (Their cores: insertcoin/cores.py.)"""
 
 
 # ---------------------------------------------------------------- systems
@@ -22,9 +22,3 @@ SYSTEMS = [
 ]
 FRIENDLY = {k: (n, m, c) for k, n, m, c in SYSTEMS}
 ORDER = {k: i for i, (k, *_ ) in enumerate(SYSTEMS)}
-
-# cores the built-in player runs (all draw in software; each was test-booted). N64 needs the graphics card: RetroArch.
-ENGINE_CORES = {"mesen_libretro.so", "fbneo_libretro.so", "mame2003_plus_libretro.so", "mame2003_libretro.so",
-                "fbalpha2012_cps3_libretro.so", "mesen-s_libretro.so", "vbam_libretro.so", "blastem_libretro.so",
-                "picodrive_libretro.so", "mednafen_supergrafx_libretro.so", "mednafen_ngp_libretro.so",
-                "pcsx_rearmed_libretro.so", "stella_libretro.so"}

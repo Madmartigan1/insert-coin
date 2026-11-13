@@ -2,6 +2,7 @@
 import collections, json, os, re, time
 from paths import APPDIR, CONFDIR, RA
 from insertcoin.systems import FRIENDLY, ORDER
+from insertcoin.cores import core_short
 from insertcoin.names import REGION_RANK, rom_stem, split_archive, tags, title_key
 from insertcoin.games import Game
 from insertcoin.web import WebGame, load_web_playlists
@@ -172,7 +173,7 @@ class Library:
             items[:] = [it for it in items if not same(it)]; added = False
         else:
             items.append({"path": g.path, "label": g.label, "core_path": g.core or "DETECT",
-                          "core_name": "DETECT" if not g.core else os.path.basename(g.core).replace("_libretro.so", ""),
+                          "core_name": "DETECT" if not g.core else core_short(g.core),
                           "crc32": "00000000|crc", "db_name": g.db or ""}); added = True
         self.favorites_raw.setdefault("version", "1.5")
         p = f"{RA}/content_favorites.lpl"; tmp = p + ".tmp"
@@ -188,7 +189,7 @@ class Library:
         d = self._read(p) or {"version": "1.5", "items": []}
         items = [it for it in d.get("items", []) if it.get("path") != g.path]
         items.insert(0, {"path": g.path, "label": g.label, "core_path": g.core,
-                         "core_name": os.path.basename(g.core).replace("_libretro.so", ""), "crc32": "DETECT", "db_name": g.db or ""})
+                         "core_name": core_short(g.core), "crc32": "DETECT", "db_name": g.db or ""})
         d["items"] = items[:200]; d.setdefault("version", "1.5")
         tmp = p + ".tmp"
         with open(tmp, "w", encoding="utf-8") as f: json.dump(d, f, indent=2)

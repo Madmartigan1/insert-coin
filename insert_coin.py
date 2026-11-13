@@ -29,6 +29,7 @@ from insertcoin import __version__
 # Every name the app defines stays reachable as insert_coin.<name>, as before the code moved into insertcoin/
 from insertcoin.logs import *  # noqa: F401,F403
 from insertcoin.systems import *  # noqa: F401,F403
+from insertcoin.cores import *  # noqa: F401,F403
 from insertcoin.controllers import *  # noqa: F401,F403
 from insertcoin.names import *  # noqa: F401,F403
 from insertcoin.games import *  # noqa: F401,F403

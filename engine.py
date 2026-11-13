@@ -28,6 +28,7 @@ from pygame._sdl2 import audio as sdla
 if os.path.dirname(os.path.abspath(__file__)) not in sys.path:     # also when loaded with runpy (docs/make_screenshots.py)
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from paths import RA, APPDIR, SAVES, SYSTEM, CONFDIR
+from insertcoin.cores import is_arcade
 W, H = 1920, 1080
 
 def split_archive(path):
@@ -552,8 +553,7 @@ class Player:
     @property
     def MENU(self):
         """Controls only for arcade games: home-console games have their own button settings in their menus."""
-        arcade = any(k in self.name for k in ("FinalBurn", "FB Alpha", "MAME"))
-        return ("Resume", "Controls", "Quit game") if arcade else ("Resume", "Quit game")
+        return ("Resume", "Controls", "Quit game") if is_arcade(self.core_path, self.name) else ("Resume", "Quit game")
 
     def core_message(self, text, seconds):
         """Shown on screen the way RetroArch does (e.g. the PC Engine core's '6-button mode selected')."""

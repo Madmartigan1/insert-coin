@@ -3,7 +3,7 @@ import os, pygame, signal, subprocess, sys, time, urllib.parse
 from pygame._sdl2 import controller as sdlc
 from paths import APPDIR, HERE, LOGDIR
 from insertcoin.logs import log
-from insertcoin.systems import ENGINE_CORES
+from insertcoin.cores import core_file, is_builtin
 from insertcoin.controllers import controller_style, sdl_controller_update
 from insertcoin.names import split_archive
 from insertcoin.web import FLASH_PAGE, RUFFLE, WebGame, browser_command, close_stale_browsers, find_browser, serve_folder
@@ -32,7 +32,7 @@ class Launcher:
             self.err("No core is set for this game yet - assign one in RetroArch"); return
         if not os.path.exists(split_archive(g.path)[0]):
             self.err("ROM file not found"); return
-        engine = self.settings.get("engine") and os.path.basename(g.core) in ENGINE_CORES
+        engine = self.settings.get("engine") and is_builtin(g.core)
         who = "Built-in player" if engine else "RetroArch"
         self.sfx.play("coin"); self.draw(); self.splash(g, engine)
         self.sfx.finish(); self.sfx.close()                          # hand the audio device to the game
@@ -42,7 +42,7 @@ class Launcher:
         pygame.display.quit()
         kind = "engine" if engine else "retroarch"
         t0 = time.time(); ralog = f"{LOGDIR}/{kind}-last.log"; rc = None
-        log.info("Launch (%s): %s | %s | %s", who, g.label, os.path.basename(g.core), g.path)
+        log.info("Launch (%s): %s | %s | %s", who, g.label, core_file(g.core), g.path)
         try:
             if os.path.exists(ralog): os.replace(ralog, f"{LOGDIR}/{kind}-previous.log")
             if engine:

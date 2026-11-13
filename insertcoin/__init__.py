@@ -7,7 +7,7 @@
   library      RetroArch's playlists, favorites and history, plus browser playlists
   games        a game;  names: labels, sorting, versions;  meta: year and publisher
   web          browser and Flash games;  flashinput: optional DevTools input for Flash
-  systems      known systems and the built-in player's cores
+  systems      known systems;  cores: every core, its systems, built-in player, arcade
   controllers  controller families, glyphs, set-up steps
   media        images, fonts, sounds;  draw: drawing helpers;  settings;  logs
 """

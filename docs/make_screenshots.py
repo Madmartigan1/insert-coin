@@ -154,7 +154,7 @@ def main():
     app.screen_mode = "systems"; go_system("Pixel Forge - 32-Bit Disc System"); app.screen_mode = "quit"; app.quit_sel = 1; save("menu")
     # the built-in player's pause menu, over a demo game's picture
     eng = runpy.run_path(os.path.join(HERE, "..", "engine.py"), run_name="engine_demo")
-    p = eng["Player"].__new__(eng["Player"]); p.screen = app.screen; p.menu_sel = 0; p.name = "MAME (demo)"
+    p = eng["Player"].__new__(eng["Player"]); p.screen = app.screen; p.menu_sel = 0; p.name = "MAME (demo)"; p.core_path = ""
     fp = pygame.font.match_font("ubuntu,notosans,dejavusans", bold=True); fc = {}
     p.font = lambda n: fc.setdefault(n, pygame.font.Font(fp, n))
     _, snap, _ = draw_art(pygame, lambda n: pygame.font.Font(fp, n), "Star Pilot X", root)
