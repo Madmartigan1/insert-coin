@@ -4,6 +4,30 @@ All notable changes to Insert Coin. Versions follow [semantic versioning](https:
 before 1.0, minor versions add features and patch versions fix bugs.
 Each version is also a [GitHub Release](https://github.com/Madmartigan1/insert-coin/releases).
 
+## [0.4.5] — 2026-11-13 · "Extra life"
+
+### Fixed
+- **Flash games respond to every pad button again.** Buttons whose keys were sent by the game's
+  page (A in some games) stopped reaching the game on some systems, while the other buttons kept
+  working. Ruffle now presses the key for every button itself, as in the first version of Flash
+  support. Each button presses one key, and shortcuts a game reads as typed letters (such as
+  "P = pause") don't respond to the pad.
+- **Box art could stop loading for the rest of a session.** A game's background, blown up to
+  cover the screen, could come out one pixel short; cutting it to size then failed and stopped
+  one of the threads that load pictures. After three such games no more art appeared. The
+  background now always fits, and a picture that can't be loaded no longer stops anything.
+- Switching on the built-in player in the **B** menu now says which systems it covers: every
+  system except Nintendo 64 (the message still named only three).
+
+### Under the hood
+- The code is split into one module per job (`insertcoin/`), with every folder defined once
+  (`paths.py`), one table of emulator cores (`insertcoin/cores.py`) and a library layer that is
+  the only code reading RetroArch's files (`insertcoin/retroarch.py`): groundwork for Insert
+  Coin's own game library.
+- **Automatic tests** (`tests/`, run with `python -m unittest discover -s tests`): names and
+  sorting, copies and versions, the core table, favorites and history, Flash buttons and picture
+  loading, all on a small made-up library.
+
 ## [0.4.4] — 2026-11-09 · "Free play"
 
 ### Added

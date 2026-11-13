@@ -63,6 +63,21 @@ layout changes, and in headless environments:
 Please look at the screenshots before submitting UI changes, and attach before/after images to
 your pull request.
 
+### Running the tests
+
+The tests check the rules that are easy to break without noticing: hiding copies and choosing
+which version leads, names and A–Z sorting, the core table, favorites and history files, the
+Flash button setup, and picture loading. They use only the standard library's `unittest`, run in
+a second or two, and need no RetroArch, controller or display:
+
+```bash
+.venv/bin/python -m unittest discover -s tests
+```
+
+Every test runs in a temporary home folder with a small made-up library (`tests/support.py`), so
+your real RetroArch setup is never read or changed. Keep it that way: tests use fictional games
+only, never names from a real collection.
+
 ### Testing game launches safely
 
 Launching a game starts the real RetroArch with your real configuration, saves and history.
@@ -72,7 +87,10 @@ somewhere temporary.
 
 ## Code guidelines
 
-- **Single file, few dependencies.** The app is `insert_coin.py`; its only third-party
+- **Small modules, few dependencies.** `insert_coin.py` starts the app; the code lives in the
+  `insertcoin/` package, one module per job (listed in `insertcoin/__init__.py`): the library,
+  the screens, controllers, launching games, browser games and so on. `engine.py` is the built-in
+  player. Every file and folder they use is defined once in `paths.py`. The only third-party
   dependency is pygame-ce. `sync_thumbnails.py` uses only the Python standard library.
   Please discuss before adding dependencies.
 - **Python 3.10+**, standard library first.
@@ -89,9 +107,9 @@ somewhere temporary.
 
 1. Fork the repository and create a branch: `git checkout -b fix/short-description`.
 2. Make focused commits with clear messages (what changed and why).
-3. Make sure both scripts still start:
-   `python3 -c "import ast; ast.parse(open('insert_coin.py').read())"`, and render the
-   screenshots with `--shot`.
+3. Make sure the tests pass (`.venv/bin/python -m unittest discover -s tests`), both scripts
+   still start (`python3 -m compileall -q insert_coin.py engine.py paths.py insertcoin`), and
+   render the screenshots with `--shot`.
 4. Update `README.md` if you change controls, options, requirements or files written.
 5. Open a pull request describing the change, how you tested it, and screenshots for UI changes.
 
@@ -99,7 +117,7 @@ somewhere temporary.
 
 Insert Coin uses [semantic versioning](https://semver.org/): `MAJOR.MINOR.PATCH`.
 Before 1.0, minor versions (0.2, 0.3, …) may add features and change behaviour;
-patch versions (0.1.1, …) are fixes only. The version lives in `__version__` in `insert_coin.py`.
+patch versions (0.1.1, …) are fixes only. The version lives in `__version__` in `insertcoin/__init__.py`.
 Every release gets an entry in [CHANGELOG.md](CHANGELOG.md).
 
 ## License

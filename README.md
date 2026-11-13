@@ -5,7 +5,7 @@
 Pick a system, scroll through the box art, press **A** to play. No keyboard, no settings menus —
 just your games, the way a console shows them.
 
-> **Status: 0.4.4 — early release.** Tested on Linux Mint 22.3 (Cinnamon, X11) with Xbox-style and
+> **Status: 0.4.5 — early release.** Tested on Linux Mint 22.3 (Cinnamon, X11) with Xbox-style and
 > PlayStation controllers. It hasn't been tried on other
 > setups yet, so expect rough edges and please [report them](CONTRIBUTING.md).
 >
@@ -214,12 +214,12 @@ so your normal browsing, tabs and windows are untouched.
 - **Controllers:** HTML5 games read the pad themselves (the browser's Gamepad API).
 - **Flash games** play through [Ruffle](https://ruffle.rs), a free Flash player. Flash games only
   know the keyboard and mouse, so Insert Coin turns the pad into both: the D-pad and left stick
-  are the arrow keys, and each button presses the key(s) set for that game (`buttons`, below).
+  are the arrow keys, and each button presses the key set for that game (`buttons`, below).
   Many Flash menus are mouse-only: the **right stick moves a pointer**, and after you've moved it
   **A clicks** — the same button that selects in Insert Coin's menus (Cross on PlayStation, the
   right-hand A on Nintendo-style pads). After a click, or as soon as you press anything else, A is
-  the game's button again. The keyboard and mouse work as well, and a few Flash screens only react
-  to the real keyboard (see Troubleshooting).
+  just the game's button again. The keyboard and mouse work as well, and a few Flash screens only
+  react to the real keyboard (see Troubleshooting).
 - **Favorites and Recently Played** work as for any other game. Insert Coin keeps them for these
   games itself, in `~/.config/insert-coin/played.json`, since RetroArch can't open them.
 
@@ -255,7 +255,7 @@ appears on the home screen after the consoles:
           "folder": "~/Games/flash",
           "start": "pixel_knights.swf",
           "boxart": "pixel_knights.png",
-          "buttons": {"south": "X+Space", "east": "C", "west": "Z", "start": "Space"}
+          "buttons": {"south": "X", "east": "C", "west": "Z", "start": "Space"}
         }
       ]
     }
@@ -270,8 +270,9 @@ appears on the home screen after the consoles:
   `east` (B / Circle), `west` (X / Square), `north` (Y / Triangle), `left-trigger` / `right-trigger`
   (LB / RB), `select`, `start`, `dpad-up` / `-down` / `-left` / `-right`. Keys: `Up`, `Down`,
   `Left`, `Right`, `Space`, `Enter`, `Shift`, `Ctrl`, `Alt`, `Tab`, `Escape`, `Backspace`, `A`–`Z`,
-  `0`–`9`; join keys with `+` to press several at once (`"X+Space"`: punch, and "press space to
-  continue"). Without it: A = Space, B = Enter, X = Z, Y = X, Start = Enter.
+  `0`–`9`. One key per button. Without it: A = Space, B = Enter, X = Z, Y = X, Start = Enter.
+  Shortcuts a game reads as typed letters (such as "P = pause") don't react to the pad; use the
+  keyboard for those.
 
 **Installing Ruffle** (only needed for Flash games): download `ruffle-…-web-selfhosted.zip` from
 [Ruffle's releases](https://github.com/ruffle-rs/ruffle/releases) and unpack it into
