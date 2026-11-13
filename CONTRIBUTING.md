@@ -63,6 +63,21 @@ layout changes, and in headless environments:
 Please look at the screenshots before submitting UI changes, and attach before/after images to
 your pull request.
 
+### Running the tests
+
+The tests check the rules that are easy to break without noticing: hiding copies and choosing
+which version leads, names and A–Z sorting, the core table, favorites and history files, the
+Flash button setup, and picture loading. They use only the standard library's `unittest`, run in
+a second or two, and need no RetroArch, controller or display:
+
+```bash
+.venv/bin/python -m unittest discover -s tests
+```
+
+Every test runs in a temporary home folder with a small made-up library (`tests/support.py`), so
+your real RetroArch setup is never read or changed. Keep it that way: tests use fictional games
+only, never names from a real collection.
+
 ### Testing game launches safely
 
 Launching a game starts the real RetroArch with your real configuration, saves and history.
@@ -92,9 +107,9 @@ somewhere temporary.
 
 1. Fork the repository and create a branch: `git checkout -b fix/short-description`.
 2. Make focused commits with clear messages (what changed and why).
-3. Make sure both scripts still start:
-   `python3 -m compileall -q insert_coin.py engine.py paths.py insertcoin`, and render the
-   screenshots with `--shot`.
+3. Make sure the tests pass (`.venv/bin/python -m unittest discover -s tests`), both scripts
+   still start (`python3 -m compileall -q insert_coin.py engine.py paths.py insertcoin`), and
+   render the screenshots with `--shot`.
 4. Update `README.md` if you change controls, options, requirements or files written.
 5. Open a pull request describing the change, how you tested it, and screenshots for UI changes.
 

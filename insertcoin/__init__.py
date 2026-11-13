@@ -1,4 +1,4 @@
-"""Insert Coin's code, one module per job. Start it with insert_coin.py.
+"""Insert Coin's code, one module per job. Start it with insert_coin.py; tests are in tests/.
 
   app          the App: state, navigation, input, main loop (built from the three mixins below)
   pads         controllers: opening, hot-plugging, setting up unrecognised pads
