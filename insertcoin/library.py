@@ -1,17 +1,21 @@
-"""The game library: RetroArch's playlists, favorites and history, plus browser playlists."""
+"""The game library: the systems and their games, Favorites and Recently Played, plus browser playlists.
+
+Games come from a source - RetroArch's playlists, favorites and history (insertcoin/retroarch.py) - and the
+library groups them: one entry per game, versions under X, the special lists, browser games after the systems.
+Nothing here reads RetroArch's files directly."""
 import collections, json, os, re, time
-from paths import APPDIR, CONFDIR, RA
+from paths import APPDIR, CONFDIR
 from insertcoin.systems import FRIENDLY, ORDER
-from insertcoin.cores import core_short
-from insertcoin.names import REGION_RANK, rom_stem, split_archive, tags, title_key
+from insertcoin.names import REGION_RANK, rom_stem, tags, title_key
 from insertcoin.games import Game
+from insertcoin.retroarch import RetroArch, read_json
 from insertcoin.web import WebGame, load_web_playlists
 
 
-def save_names():
-    """Names of every battery save (RetroArch's and Insert Coin's), to prefer the copy of a game you've played."""
+def save_names(dirs=()):
+    """Names of every battery save (the source's and Insert Coin's), to prefer the copy of a game you've played."""
     names = set()
-    for d in (f"{RA}/saves", f"{APPDIR}/saves"):
+    for d in (*dirs, f"{APPDIR}/saves"):
         for root, _, files in os.walk(d):
             names.update(os.path.splitext(f)[0].lower() for f in files)
     return names
@@ -54,32 +58,19 @@ def group_versions(games, saves):
 
 
 class Library:
-    def __init__(self, one_per_game=True):
+    def __init__(self, one_per_game=True, source=None):
         self.one_per_game = one_per_game                            # False: every ROM in the playlists, as RetroArch lists them
-        self.defaults = {}
+        self.source = source or RetroArch()                         # where the games, favorites and history come from
         self.hidden = 0                                             # duplicate copies not shown
         self.systems = []          # list of dicts: id, name, maker, color, games, special
         self.load()
 
-    def _read(self, path):
-        try:
-            with open(path, encoding="utf-8") as f: return json.load(f)
-        except Exception: return None
-
     def load(self):
         self.systems = []
-        pls = {}
-        pdir = f"{RA}/playlists"
-        for f in sorted(os.listdir(pdir) if os.path.isdir(pdir) else []):
-            if f.endswith(".lpl"):
-                d = self._read(f"{RA}/playlists/{f}")
-                if d: pls[f[:-4]] = d
-        for name, d in pls.items():
-            dc = d.get("default_core_path") or ""
-            self.defaults[name + ".lpl"] = dc if dc and os.path.exists(dc) else None
-        saves = save_names(); self.hidden = 0
-        for name, d in sorted(pls.items(), key=lambda kv: (ORDER.get(kv[0], 99), kv[0])):
-            games = [Game(it, name + ".lpl", self.defaults[name + ".lpl"]) for it in d.get("items", []) if it.get("path")]
+        pls = self.source.playlists()
+        saves = save_names((self.source.SAVES,)); self.hidden = 0
+        for name, entries in sorted(pls, key=lambda kv: (ORDER.get(kv[0], 99), kv[0])):
+            games = [Game(*e) for e in entries]
             if not games: continue                                  # tidy: hide empty systems
             if self.one_per_game:
                 n = len(games); games = dedupe(games, saves); self.hidden += n - len(games)
@@ -90,7 +81,6 @@ class Library:
         web = load_web_playlists()                                  # browser games: after the systems
         self.systems += web
         self.web_index = {g.path: g for s in web for g in s["games"]}
-        self.favorites_raw = (self._read(f"{RA}/content_favorites.lpl") or {"version": "1.5", "items": []})
         self.refresh_specials()
 
     # Browser games can't go into RetroArch's favorites / history (it can't open them), so Insert Coin keeps its
@@ -98,7 +88,7 @@ class Library:
     STATE = "played.json"
 
     def _state(self):
-        d = self._read(f"{CONFDIR}/{self.STATE}") or {}
+        d = read_json(f"{CONFDIR}/{self.STATE}") or {}
         for k in ("favorites", "recent", "launches"): d.setdefault(k, [])
         return d
 
@@ -126,25 +116,16 @@ class Library:
             ranked.append(((min(len(newer), len(rec)) - 0.5, -r.get("t", 0)), g))
         return [g for _, g in sorted(ranked, key=lambda x: x[0])]
 
-    def _special_games(self, items):
-        out = []
-        for it in items:
-            if not it.get("path") or not os.path.exists(split_archive(it["path"])[0]): continue
-            db = it.get("db_name") or ""
-            out.append(Game(it, db, self.defaults.get(db)))
-        return out
-
     def refresh_specials(self):
         self.systems = [s for s in self.systems if not s["special"]]
-        hist = self._read(f"{RA}/content_history.lpl") or {"items": []}
-        self.favorites_raw = self._read(f"{RA}/content_favorites.lpl") or {"version": "1.5", "items": []}
-        fav = self._special_games(self.favorites_raw.get("items", []))
+        hist = [Game(*e) for e in self.source.history()]
+        fav = [Game(*e) for e in self.source.favorites()]
         fav = dedupe(fav, set()) if self.one_per_game else fav
         st = self._state() if self.web_index else None
         if st: fav += [self.web_index[p] for p in st["favorites"] if p in self.web_index]
         fav = sorted(fav, key=lambda g: g.key)
         seen, rec = set(), []
-        for g in self._special_games(hist.get("items", [])):
+        for g in hist:
             k = (g.db, g.label) if self.one_per_game else g.path
             if k not in seen: seen.add(k); rec.append(g)
         if st: rec = self._web_recent(rec, st)
@@ -152,8 +133,7 @@ class Library:
         if fav: specials.append({"id": "favorites", "name": "Favorites", "maker": "Your picks", "color": (230, 180, 40), "games": fav, "special": "fav"})
         if rec: specials.append({"id": "recent", "name": "Recently Played", "maker": "Pick up where you left off", "color": (60, 170, 200), "games": rec[:60], "special": "recent"})
         self.systems = specials + self.systems
-        self.fav_paths = {it.get("path") for it in self.favorites_raw.get("items", [])}
-        self.fav_keys = {(it.get("db_name") or "", it.get("label")) for it in self.favorites_raw.get("items", [])}
+        self.fav_paths, self.fav_keys = self.source.favorite_marks()
         self.web_favs = set(st["favorites"]) if st else set()
 
     def is_fav(self, g):
@@ -167,30 +147,11 @@ class Library:
             d["favorites"] = [p for p in d["favorites"] if p != g.path] + ([g.path] if added else [])
             self._save_state(d); self.web_favs = set(d["favorites"])
             return added
-        items = self.favorites_raw.setdefault("items", [])
-        same = lambda it: it.get("path") == g.path or ((it.get("db_name") or ""), it.get("label")) == ((g.db or ""), g.label)
-        if self.is_fav(g):
-            items[:] = [it for it in items if not same(it)]; added = False
-        else:
-            items.append({"path": g.path, "label": g.label, "core_path": g.core or "DETECT",
-                          "core_name": "DETECT" if not g.core else core_short(g.core),
-                          "crc32": "00000000|crc", "db_name": g.db or ""}); added = True
-        self.favorites_raw.setdefault("version", "1.5")
-        p = f"{RA}/content_favorites.lpl"; tmp = p + ".tmp"
-        with open(tmp, "w", encoding="utf-8") as f: json.dump(self.favorites_raw, f, indent=2)
-        os.replace(tmp, p)
-        self.fav_paths = {it.get("path") for it in items}
-        self.fav_keys = {(it.get("db_name") or "", it.get("label")) for it in items}
+        added = not self.is_fav(g)
+        self.source.set_favorite(g, added)
+        self.fav_paths, self.fav_keys = self.source.favorite_marks()
         return added
 
     def add_history(self, g):
         """Put a game at the top of Recently Played (the built-in player's job; RetroArch does it itself)."""
-        p = f"{RA}/content_history.lpl"
-        d = self._read(p) or {"version": "1.5", "items": []}
-        items = [it for it in d.get("items", []) if it.get("path") != g.path]
-        items.insert(0, {"path": g.path, "label": g.label, "core_path": g.core,
-                         "core_name": core_short(g.core), "crc32": "DETECT", "db_name": g.db or ""})
-        d["items"] = items[:200]; d.setdefault("version", "1.5")
-        tmp = p + ".tmp"
-        with open(tmp, "w", encoding="utf-8") as f: json.dump(d, f, indent=2)
-        os.replace(tmp, p)
+        self.source.add_history(g)

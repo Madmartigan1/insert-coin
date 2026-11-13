@@ -32,6 +32,7 @@ from insertcoin.systems import *  # noqa: F401,F403
 from insertcoin.cores import *  # noqa: F401,F403
 from insertcoin.controllers import *  # noqa: F401,F403
 from insertcoin.names import *  # noqa: F401,F403
+from insertcoin.retroarch import *  # noqa: F401,F403
 from insertcoin.games import *  # noqa: F401,F403
 from insertcoin.web import *  # noqa: F401,F403
 from insertcoin.flashinput import *  # noqa: F401,F403
