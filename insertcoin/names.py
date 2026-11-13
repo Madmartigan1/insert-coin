@@ -15,7 +15,7 @@ def sanitize(s):
 
 def clean_title(label):
     t = re.sub(r"\s*[\(\[][^)\]]*[\)\]]", "", label).strip()
-    m = re.match(r"^(.*), (The|A|An)( - .*)?$", t)          # "Legend of Zelda, The - X" -> "The Legend of Zelda - X"
+    m = re.match(r"^(.*), (The|A|An)( - .*)?$", t)          # "Legend of Star Pilot, The - X" -> "The Legend of Star Pilot - X"
     if m: t = f"{m.group(2)} {m.group(1)}{m.group(3) or ''}"
     return t or label
 

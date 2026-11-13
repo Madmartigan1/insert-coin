@@ -1,7 +1,8 @@
 """The core table: one entry per core, and everything derived from it."""
 import unittest
 import support  # noqa: F401
-from insertcoin.cores import CORES, DEFAULT_CORE, ENGINE_CORES, core_file, core_short, is_arcade, is_builtin
+from insertcoin.cores import (CORES, DEFAULT_CORE, ENGINE_CORES, core_file, core_short, is_arcade, is_builtin,
+                              not_builtin_systems)
 from insertcoin.systems import FRIENDLY
 
 
@@ -29,6 +30,10 @@ class CoreTable(unittest.TestCase):
     def test_one_default_core_per_system(self):
         listed = [s for c in CORES.values() for s in c.systems]
         self.assertEqual(len(listed), len(set(listed)))
+
+    def test_systems_left_to_retroarch(self):
+        """What the B menu says when the built-in player is switched on."""
+        self.assertEqual(not_builtin_systems(), ["Nintendo 64"])
 
     def test_names(self):
         self.assertEqual(core_file("/home/me/cores/mesen-s_libretro.so"), "mesen-s_libretro.so")

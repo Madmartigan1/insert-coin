@@ -5,6 +5,7 @@ from insertcoin import __version__
 from insertcoin.logs import log, start_log
 from insertcoin.web import WebGame
 from insertcoin.library import Library
+from insertcoin.cores import not_builtin_systems
 from insertcoin.meta import Meta
 from insertcoin.media import Fonts, Images, Sounds
 from insertcoin.settings import load_settings, save_settings
@@ -143,8 +144,10 @@ class App(Pads, Launcher, Screens):
         try: save_settings(self.settings)
         except Exception as e: self.say(f"Could not save the setting: {e}")
         self.sfx.play("select")
-        self.say("Built-in player: NES, FBNeo and MAME 2003-Plus games run without RetroArch" if self.settings["engine"]
-                 else "All games run in RetroArch", 3.0)
+        left = not_builtin_systems()
+        on = "Built-in player: " + (f"every system except {' and '.join(left)} runs without RetroArch" if left
+                                    else "every system runs without RetroArch")
+        self.say(on if self.settings["engine"] else "All games run in RetroArch", 3.0)
 
     def toggle_sound(self):
         self.settings["sound"] = self.sfx.enabled = not self.sfx.enabled

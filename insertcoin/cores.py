@@ -6,6 +6,7 @@ RetroArch's playlists still choose which core a game uses; `systems` records the
 starts with, for the day Insert Coin keeps its own library."""
 import os
 from typing import NamedTuple
+from insertcoin.systems import FRIENDLY
 
 
 class Core(NamedTuple):
@@ -47,6 +48,11 @@ def core_file(path):
 def core_short(path):
     """The short name RetroArch's playlists use for a core ("mesen"), from its path."""
     return core_file(path).replace("_libretro.so", "")
+
+
+def not_builtin_systems():
+    """Friendly names of the systems whose usual core the built-in player can't run (["Nintendo 64"])."""
+    return sorted({FRIENDLY[s][0] for c in CORES.values() if not c.builtin for s in c.systems if s in FRIENDLY})
 
 
 def is_builtin(path):
