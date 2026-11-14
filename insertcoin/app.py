@@ -5,6 +5,7 @@ from insertcoin import __version__
 from insertcoin.logs import log, start_log
 from insertcoin.web import WebGame
 from insertcoin.library import Library
+from insertcoin.ownlib import open_source
 from insertcoin.cores import not_builtin_systems
 from insertcoin.meta import Meta
 from insertcoin.media import Fonts, Images, Sounds
@@ -25,7 +26,7 @@ class App(Pads, Launcher, Screens):
         self.sfx = Sounds(enabled=self.settings["sound"], start=not shot)
         self.open_display()
         self.fonts = Fonts()
-        self.lib = Library(one_per_game=self.settings["one_per_game"])
+        self.lib = self.make_library()
         self.meta = Meta({s["id"] for s in self.lib.systems if not s["special"]})
         self.img = Images(sync=bool(shot))
         self.pads = {}; self.pad_style = {}                         # device index -> Controller; instance id -> style
@@ -51,6 +52,7 @@ class App(Pads, Launcher, Screens):
         self.hold = {}; self.quit_sel = 1; self.vlist = []; self.vsel = 0
         self.q = ""; self.kpos = (1, 0); self.preview = []; self.back_to = (self.si, "systems")   # the search screen
         self.clock = pygame.time.Clock()
+        if self.lib_note: self.say(self.library_message(), 4.0)
 
     # -- display / input
     def open_display(self):
@@ -58,6 +60,12 @@ class App(Pads, Launcher, Screens):
         self.screen = pygame.display.set_mode((W, H), flags, vsync=0 if self.shot else 1)
         pygame.display.set_caption("Insert Coin")
         pygame.mouse.set_visible(bool(self.windowed))
+
+    def make_library(self):
+        """The game library from the source the "library" setting names (RetroArch's playlists or Insert Coin's)."""
+        self.lib_kind, source, self.lib_note = open_source(self.settings.get("library"))
+        log.info("Library: %s", "Insert Coin (beta)" if self.lib_kind == "insertcoin" else "RetroArch playlists")
+        return Library(one_per_game=self.settings["one_per_game"], source=source)
 
     # -- current state helpers
     @property
@@ -126,6 +134,7 @@ class App(Pads, Launcher, Screens):
             elif choice.startswith("Sound"): self.toggle_sound()
             elif choice.startswith("Player"): self.toggle_engine()
             elif choice.startswith("Games"): self.toggle_grouping()
+            elif choice.startswith("Library"): self.toggle_library()
             else: self.sfx.play("select"); self.setup_from_menu()
 
     def toggle_grouping(self):
@@ -134,12 +143,32 @@ class App(Pads, Launcher, Screens):
         try: save_settings(self.settings)
         except Exception as e: self.say(f"Could not save the setting: {e}")
         sid = self.sys["id"] if self.lib.systems else None
-        self.lib = Library(one_per_game=self.settings["one_per_game"]); self.gi = {}
+        self.lib = self.make_library(); self.gi = {}
         self.si = next((i for i, s in enumerate(self.lib.systems) if s["id"] == sid), 0); self.spos = float(self.si)
         self.sfx.play("select")
         total = sum(len(s["games"]) for s in self.lib.systems if not s["special"])
         self.say(f"One entry per game: {total:,} games (other versions under X)" if self.settings["one_per_game"]
                  else f"Showing every ROM: {total:,} entries", 3.0)
+
+    def toggle_library(self):
+        """RetroArch's playlists or Insert Coin's own library (imported from RetroArch the first time)."""
+        self.settings["library"] = "retroarch" if self.settings.get("library") == "insertcoin" else "insertcoin"
+        sid = self.sys["id"] if self.lib.systems else None
+        self.lib = self.make_library(); self.gi = {}
+        if self.lib_kind != self.settings["library"]: self.settings["library"] = self.lib_kind   # it fell back
+        try: save_settings(self.settings)
+        except Exception as e: self.say(f"Could not save the setting: {e}")
+        self.si = next((i for i, s in enumerate(self.lib.systems) if s["id"] == sid), 0); self.spos = float(self.si)
+        self.sfx.play("select")
+        self.say(self.library_message(), 3.0)
+
+    def library_message(self):
+        """What the library switch says: which library, and how many games it shows in the current Games mode."""
+        if self.lib_note and self.lib_note != "imported": return self.lib_note          # it fell back to RetroArch
+        total = sum(len(s["games"]) for s in self.lib.systems if not s["special"])
+        count = f"{total:,} games" if self.settings["one_per_game"] else f"{total:,} entries"
+        if self.lib_kind != "insertcoin": return f"Library: RetroArch playlists - {count}"
+        return f"Library: Insert Coin (beta) - {count}" + (" (imported from RetroArch)" if self.lib_note else "")
 
     def toggle_engine(self):
         self.settings["engine"] = not self.settings.get("engine")

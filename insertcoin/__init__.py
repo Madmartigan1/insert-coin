@@ -6,6 +6,7 @@
   screens      drawing every screen
   library      the systems' games, Favorites, Recently Played, browser playlists
   retroarch    the games' source: RetroArch's playlists, favorites, history, thumbnails
+  ownlib       Insert Coin's own library (library.json), imported from RetroArch
   games        a game;  names: labels, sorting, versions;  meta: year and publisher
   web          browser and Flash games;  flashinput: optional DevTools input for Flash
   systems      known systems;  cores: every core, its systems, built-in player, arcade

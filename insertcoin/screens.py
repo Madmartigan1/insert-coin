@@ -236,7 +236,7 @@ class Screens:
         f = self.fonts(46, True)
         if self.q:
             r = text(self.screen, f, self.q, (box.left + 34, box.centery), (20, 22, 30), anchor="midleft", shadow=False, maxw=980)
-            if int(time.time() * 2) % 2: pygame.draw.rect(self.screen, (20, 22, 30), (r.right + 4, box.centery - 26, 4, 52))
+            if self.shot or int(time.time() * 2) % 2: pygame.draw.rect(self.screen, (20, 22, 30), (r.right + 4, box.centery - 26, 4, 52))
         else:
             text(self.screen, self.fonts(40), "for example: knight", (box.left + 34, box.centery), (140, 145, 160), anchor="midleft", shadow=False)
         x0, y, kw, gap = box.left, 320, 94, 10
@@ -271,7 +271,9 @@ class Screens:
     def POWER_MENU(self):
         return ("Resume", f"Sound: {'On' if self.sfx.enabled else 'Off'}",
                 f"Player: {'Built-in (beta)' if self.settings.get('engine') else 'RetroArch'}",
-                f"Games: {'One per game' if self.settings['one_per_game'] else 'Show all'}", "Set up controller", "Exit Insert Coin")
+                f"Games: {'One per game' if self.settings['one_per_game'] else 'Show all'}",
+                f"Library: {'Insert Coin (beta)' if self.settings.get('library') == 'insertcoin' else 'RetroArch'}",
+                "Set up controller", "Exit Insert Coin")
 
     def draw_quit(self):
         self.draw_systems(hints=False)

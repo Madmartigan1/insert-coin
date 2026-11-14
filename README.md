@@ -134,6 +134,7 @@ back. From the results, **B** returns to the keyboard with your words still ther
 | **Sound: On / Off** | Menu sounds |
 | **Player: RetroArch / Built-in (beta)** | Which program plays your games — see [Built-in player](#built-in-player-beta) |
 | **Games: One per game / Show all** | Group copies and versions of a game into one entry, or list every ROM |
+| **Library: RetroArch / Insert Coin (beta)** | Where the list of games comes from: RetroArch's playlists, or Insert Coin's own library. The first time you choose Insert Coin, it copies your RetroArch playlists into its own library (a second or so); after that it reads its own copy. Same games, versions and box art either way; favorites and Recently Played are still RetroArch's. If Insert Coin's library can't be read, it shows RetroArch's playlists and says so |
 | **Set up controller** | Redo the button set-up for an unrecognised pad |
 | **Exit Insert Coin** | Close Insert Coin |
 
@@ -433,7 +434,8 @@ can overwrite each other's settings.
 | `~/.cache/insert-coin/meta/` | Cached year/publisher lookups |
 | `~/.config/insert-coin/controllers.json` | Button set-ups for controllers that aren't recognised automatically |
 | `~/.config/insert-coin/remaps/` | Button layouts you chose for single games in the built-in player (**Controls**) |
-| `~/.config/insert-coin/settings.json` | Your settings: menu sounds, which player, one entry per game or show all |
+| `~/.config/insert-coin/settings.json` | Your settings: menu sounds, which player, one entry per game or show all, which library |
+| `~/.local/share/insert-coin/library.json` | Insert Coin's own game library (**Library: Insert Coin**), copied from your RetroArch playlists the first time you choose it |
 | `~/.config/insert-coin/played.json` | Favorites and Recently Played for browser games, and the time of each game launch (to place them in Recently Played) |
 | `~/.local/share/insert-coin/browser/` | The browser profile browser games run in |
 | `~/.local/state/insert-coin/browser-last.log` | The browser's output for the last browser game (`browser-previous.log`: the one before) |
