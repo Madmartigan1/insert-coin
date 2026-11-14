@@ -12,7 +12,7 @@ SYSTEMS = [
     ("Nintendo - Game Boy", "Game Boy", "Nintendo", (140, 160, 60)),
     ("Nintendo - Game Boy Color", "Game Boy Color", "Nintendo", (150, 70, 190)),
     ("Nintendo - Game Boy Advance", "Game Boy Advance", "Nintendo", (70, 80, 200)),
-    ("Sega - Mega Drive - Genesis", "Mega Drive", "Sega", (30, 110, 210)),
+    ("Sega - Mega Drive - Genesis", "Mega Drive / Genesis", "Sega", (30, 110, 210)),
     ("Sega - 32X", "Sega 32X", "Sega", (200, 60, 60)),
     ("NEC - PC Engine - TurboGrafx 16", "PC Engine", "NEC", (240, 120, 40)),
     ("Sony - PlayStation", "PlayStation", "Sony", (110, 120, 140)),
