@@ -62,6 +62,7 @@ class Scan(unittest.TestCase):
         make_zip("famicom/galaxy.zip", {"Galaxy (J).nes": COMET + b"g"})                      # console, set-like name
         make_zip("snes/DSP9 (World) (Enhancement Chip).zip", {"DSP9 (World) (Enhancement Chip).sfc": b"dsp" * 100})
         put("snes/Pixel Knights (USA) [h].smc", b"\0" * 512 + b"pixel knights" * 1024)        # copier header
+        put("gb/[BIOS] Byte Console Boot ROM (World).gb", b"boot" * 64)                       # BIOS by its file name
         put("notes/README.md", b"# just text")
         put("broken/Wave (USA).zip", b"not really a zip")
         self.md_listed = put("md/Byte Rally (USA).md", b"byte rally md" * 40)
@@ -92,6 +93,9 @@ class Scan(unittest.TestCase):
         self.assertEqual(self.paths(r, "FBNeo - Arcade Games", "new"), [])
         self.assertEqual([x["name"] for x in r["systems"][SNES]["new"]], ["Pixel Knights (USA)"])     # copier header
         self.assertEqual([x["name"] for x in r["systems"][SNES]["not_games"]], ["DSP9 (World) (Enhancement Chip)"])
+        self.assertEqual([x["name"] for x in r["systems"]["Nintendo - Game Boy"]["not_games"]],
+                         ["[BIOS] Byte Console Boot ROM (World).gb"])
+        self.assertEqual(r["systems"]["Nintendo - Game Boy"]["by_type"], [])
         self.assertEqual([os.path.relpath(u["path"], ROOT) for u in r["unknown"]], ["arcade/nosuch.zip"])
         self.assertEqual([os.path.relpath(u["path"], ROOT) for u in r["unreadable"]], ["broken/Wave (USA).zip"])
         self.assertNotIn("notes/README.md", str(r))                                                   # text, not a game

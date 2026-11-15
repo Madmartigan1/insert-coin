@@ -98,8 +98,8 @@ def default_roots(paths):
     above: then each playlist's own folders."""
     dirs = sorted({os.path.dirname(split_archive(p)[0]) for p in paths})
     if not dirs: return []
-    common = os.path.commonpath(dirs)
-    if len(common) > len(os.path.expanduser("~")): return [common]
+    common, home = os.path.commonpath(dirs), os.path.expanduser("~")
+    if not (home == common or home.startswith(common.rstrip(os.sep) + os.sep)): return [common]
     out = []
     for d in dirs:
         if not any(d == r or d.startswith(r + os.sep) for r in out): out.append(d)
@@ -240,8 +240,9 @@ def scan(roots=None, dbs=None, listed=None, progress=None):
                             else "not in the database, and its file type is used by several systems"}); continue
         s = systems.setdefault(sy, _empty())
         ks = keys(sy, kind, crcs, set_name)
-        if name and NOT_A_GAME.search(name):
-            s["not_games"].append({"path": p, "name": name}); continue
+        archive, inner = split_archive(p)
+        if NOT_A_GAME.search(name or os.path.basename(inner or archive)):      # its database name, else its file name
+            s["not_games"].append({"path": p, "name": name or os.path.basename(inner or archive)}); continue
         same = next((first[k] for k in ks if k in first), None)
         if same:
             s["copies"].append({"path": p, "of": same}); continue

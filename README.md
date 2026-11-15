@@ -409,6 +409,7 @@ Start **Insert Coin** from your applications menu, or run:
 | `--windowed` | Run in a window instead of fullscreen — games too (handy for testing next to a terminal) |
 | `--shot DIR` | Render sample screens to PNG files in `DIR` and exit — no display needed (for testing) |
 | `--scan` | Look through your game folders and report the games that aren't in your library yet, system by system — **changes nothing** (beta; see below) |
+| `--scan --add` | The same, then test-start each game found and add the ones that start to Insert Coin's own library (beta; see below) |
 
 ### Scanning for games (beta)
 
@@ -420,8 +421,20 @@ are **new** (recognised but not in your library), how many it could only place *
 database, such as translations and hacks), and how many are **copies** of games you already have. BIOS and
 enhancement-chip files are set apart. The first scan reads every archive's index (a few minutes for a large
 collection); later scans only read what changed. The full list goes to
-`~/.local/share/insert-coin/scan-report.json`. For now it only reports: adding the new games, after checking
-that each one starts, comes next.
+`~/.local/share/insert-coin/scan-report.json`.
+
+`--scan --add` then test-starts every new game and every game placed by type (copies are never added). Each
+runs in the built-in player for 60 seconds of game time, without a window, sound, saves or controllers, with
+Start, A and B pressed along the way; that takes a few seconds per game. A game is added if any of its frames
+shows something, so games without box art or with a dark title screen still count. It is left out only if it
+can't be loaded, the player stops with an error, or the screen stays black the whole time (a black screen gets a
+second start, since some cores fill the console's memory with random values at power-on). Arcade sets are also
+tried with the other arcade cores, and Mega Drive games with PicoDrive when BlastEm can't start them (it
+can't read `.smd` files); the core that starts a game is remembered. Games are added to Insert Coin's
+own library only (B menu → *Library: Insert Coin*); RetroArch's playlists aren't changed, and the library as it
+was before is kept beside it (`library.json.pre-scan-…`). Games left out are never deleted: they're listed with
+the reason in `~/.local/share/insert-coin/scan-not-added.json`. Nintendo 64 games are listed there as not tested
+for now, since the built-in player can't run them yet. Running it again only tests what is new or changed.
 
 **Tip:** close RetroArch before starting Insert Coin. Two copies of RetroArch running at once
 can overwrite each other's settings.
@@ -452,6 +465,8 @@ can overwrite each other's settings.
 | `~/.local/share/insert-coin/library.json` | Insert Coin's own game library (**Library: Insert Coin**), copied from your RetroArch playlists the first time you choose it |
 | `~/.local/share/insert-coin/scan-report.json` | What the last `--scan` found |
 | `~/.cache/insert-coin/scan.json` | What each scanned file holds, so later scans only read what changed |
+| `~/.local/share/insert-coin/scan-not-added.json` | Games `--scan --add` found but didn't add, and why (nothing is deleted) |
+| `~/.cache/insert-coin/test-starts.json` | The result of each test start, so later runs only test what is new or changed |
 | `~/.local/share/insert-coin/favorites.json`, `history.json` | Favorites and Recently Played for **Library: Insert Coin**, copied from RetroArch's the first time |
 | `~/.config/insert-coin/played.json` | Favorites and Recently Played for browser games, and the time of each game launch (to place them in Recently Played) |
 | `~/.local/share/insert-coin/browser/` | The browser profile browser games run in |

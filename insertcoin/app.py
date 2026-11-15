@@ -385,10 +385,15 @@ def main():
     shot = a[a.index("--shot") + 1] if "--shot" in a else None
     if shot: os.environ["SDL_VIDEODRIVER"] = "dummy"; os.environ["SDL_AUDIODRIVER"] = "dummy"
     if not shot: start_log()
-    if "--scan" in a:                                              # report what a scan would add; changes nothing
+    if "--scan" in a:                    # report what a scan finds (changes nothing); with --add, test-start and add them
         from insertcoin.scanner import scan, summary
         print("Scanning your game folders (the first scan reads every archive's index; later ones only what changed)...")
-        print(summary(scan(progress=lambda n: print(f"  {n:,} files...", end="\r", flush=True))))
+        report = scan(progress=lambda n: print(f"  {n:,} files...", end="\r", flush=True))
+        print(summary(report))
+        if "--add" in a:
+            from insertcoin import adding
+            print("\nTest-starting the games found (60 seconds of game time each, no window or sound)...")
+            print(adding.summary(adding.add_found(report, progress=lambda n, t: print(f"  {n:,} of {t:,}...", end="\r", flush=True))))
         return
     try:
         App(windowed="--windowed" in a, shot=shot).run()
