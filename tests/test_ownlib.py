@@ -172,6 +172,7 @@ class Closing(unittest.TestCase):
         from unittest import mock
         import insertcoin.app as app
         with mock.patch.object(app, "App", side_effect=KeyboardInterrupt), mock.patch.object(app.sys, "argv", ["insert_coin.py"]), \
+                mock.patch.object(app, "start_log"), \
                 self.assertLogs("insert-coin", "INFO") as logs, self.assertRaises(SystemExit) as ex:
             app.main()
         self.assertEqual(ex.exception.code, 130)

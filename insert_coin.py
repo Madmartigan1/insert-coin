@@ -19,6 +19,7 @@ Controls (Xbox-style pad; keyboard in brackets)
 
 Options: --windowed   run in a window (for testing)
          --shot DIR   render sample screens to PNG files and exit (no display needed)
+         --scan       look through your game folders and report games not listed yet (changes nothing)
 """
 import os, sys
 

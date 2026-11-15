@@ -408,6 +408,20 @@ Start **Insert Coin** from your applications menu, or run:
 |---|---|
 | `--windowed` | Run in a window instead of fullscreen — games too (handy for testing next to a terminal) |
 | `--shot DIR` | Render sample screens to PNG files in `DIR` and exit — no display needed (for testing) |
+| `--scan` | Look through your game folders and report the games that aren't in your library yet, system by system — **changes nothing** (beta; see below) |
+
+### Scanning for games (beta)
+
+`--scan` looks through the folder that holds your games (found from your library) and recognises each game by
+its checksum, read from the zip's index without unpacking it, and arcade games by their set name, using
+RetroArch's databases. It also recognises Mega Drive `.smd` files, NES ROMs with unusual headers and Super
+Nintendo ROMs with a copier header. For each system it reports how many games are already **listed**, how many
+are **new** (recognised but not in your library), how many it could only place **by type** (not in the
+database, such as translations and hacks), and how many are **copies** of games you already have. BIOS and
+enhancement-chip files are set apart. The first scan reads every archive's index (a few minutes for a large
+collection); later scans only read what changed. The full list goes to
+`~/.local/share/insert-coin/scan-report.json`. For now it only reports: adding the new games, after checking
+that each one starts, comes next.
 
 **Tip:** close RetroArch before starting Insert Coin. Two copies of RetroArch running at once
 can overwrite each other's settings.
@@ -421,7 +435,7 @@ can overwrite each other's settings.
 | `~/.config/retroarch/playlists/*.lpl` | Your systems and games, and each game's core |
 | `~/.config/retroarch/thumbnails/` | Box art, snapshots, title screens |
 | `~/.config/retroarch/content_history.lpl` | Recently Played |
-| `~/.config/retroarch/database/rdb/*.rdb` | Year and publisher information |
+| `~/.config/retroarch/database/rdb/*.rdb` | Year and publisher information, and (`--scan`) the checksums and arcade set names games are recognised by |
 | `~/.config/insert-coin/browser_games.json` | Your browser and Flash game playlists (optional) |
 
 **Writes:**
@@ -436,6 +450,8 @@ can overwrite each other's settings.
 | `~/.config/insert-coin/remaps/` | Button layouts you chose for single games in the built-in player (**Controls**) |
 | `~/.config/insert-coin/settings.json` | Your settings: menu sounds, which player, one entry per game or show all, which library |
 | `~/.local/share/insert-coin/library.json` | Insert Coin's own game library (**Library: Insert Coin**), copied from your RetroArch playlists the first time you choose it |
+| `~/.local/share/insert-coin/scan-report.json` | What the last `--scan` found |
+| `~/.cache/insert-coin/scan.json` | What each scanned file holds, so later scans only read what changed |
 | `~/.local/share/insert-coin/favorites.json`, `history.json` | Favorites and Recently Played for **Library: Insert Coin**, copied from RetroArch's the first time |
 | `~/.config/insert-coin/played.json` | Favorites and Recently Played for browser games, and the time of each game launch (to place them in Recently Played) |
 | `~/.local/share/insert-coin/browser/` | The browser profile browser games run in |
