@@ -3,7 +3,7 @@ import json, os, unittest
 import support as S
 import paths
 from insertcoin.library import Library
-from insertcoin.ownlib import OwnLibrary, import_retroarch, open_source
+from insertcoin.ownlib import OwnLibrary, RetroArchKeepingOwn, import_retroarch, open_source
 from insertcoin.retroarch import RetroArch
 
 
@@ -128,6 +128,55 @@ class FavoritesAndHistory(unittest.TestCase):
 
     def mesen_core(self):
         return f"{S.CORES}/mesen_libretro.so"
+
+
+class KeptInStepFromRetroArch(unittest.TestCase):
+    """With "Library: RetroArch", stars and games played also reach Insert Coin's lists, once they exist."""
+    def setUp(self):
+        S.sample_library()
+
+    def test_star_unstar_and_play_reach_insert_coins_lists(self):
+        import_retroarch(); Library(source=OwnLibrary())                  # Insert Coin's lists exist
+        ra = Library(source=open_source("retroarch")[1])
+        g = find(ra, "Wavebreaker (USA)")
+        ra.toggle_favorite(g)
+        own = Library(source=OwnLibrary())
+        self.assertEqual(labels(own, "favorites"), ["Wavebreaker (USA)"])
+        ra.add_history(find(ra, "Turbo Tanks II (USA)"))                    # the built-in player
+        ra.played_in_retroarch(g)                                           # RetroArch, which keeps its own list
+        self.assertEqual([it["label"] for it in S.read(RetroArch.HISTORY)["items"]], ["Turbo Tanks II (USA)"])
+        own = Library(source=OwnLibrary())
+        self.assertEqual(labels(own, "recent"), ["Wavebreaker (USA)", "Turbo Tanks II (USA)"])
+        ra.toggle_favorite(g)                                               # unstarred: gone from both
+        self.assertEqual(S.read(paths.FAVORITES)["items"], [])
+        self.assertEqual(S.read(RetroArch.FAVORITES)["items"], [])
+
+    def test_nothing_written_before_insert_coins_lists_exist(self):
+        ra = Library(source=open_source("retroarch")[1])
+        g = find(ra, "Wavebreaker (USA)")
+        ra.toggle_favorite(g); ra.add_history(g); ra.played_in_retroarch(g)
+        self.assertFalse(os.path.exists(paths.FAVORITES) or os.path.exists(paths.HISTORY))
+        self.assertEqual(len(S.read(RetroArch.FAVORITES)["items"]), 1)      # RetroArch's as before
+
+    def test_a_damaged_list_is_left_alone(self):
+        import_retroarch(); Library(source=OwnLibrary())
+        with open(paths.HISTORY, "w") as f: f.write("[broken")
+        ra = Library(source=RetroArchKeepingOwn())
+        ra.add_history(find(ra, "Wavebreaker (USA)"))
+        with open(paths.HISTORY) as f: self.assertEqual(f.read(), "[broken")
+        self.assertEqual(S.read(RetroArch.HISTORY)["items"][0]["label"], "Wavebreaker (USA)")
+
+
+class Closing(unittest.TestCase):
+    def test_ctrl_c_is_an_ordinary_close(self):
+        from unittest import mock
+        import insertcoin.app as app
+        with mock.patch.object(app, "App", side_effect=KeyboardInterrupt), mock.patch.object(app.sys, "argv", ["insert_coin.py"]), \
+                self.assertLogs("insert-coin", "INFO") as logs, self.assertRaises(SystemExit) as ex:
+            app.main()
+        self.assertEqual(ex.exception.code, 130)
+        self.assertIn("Insert Coin closed (Ctrl+C in the terminal)", "\n".join(logs.output))
+        self.assertNotIn("ERROR", "\n".join(logs.output))
 
 
 class Choosing(unittest.TestCase):

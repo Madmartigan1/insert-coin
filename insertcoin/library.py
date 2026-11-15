@@ -69,6 +69,7 @@ class Library:
     def load(self):
         self.systems = []
         pls = self.source.playlists()
+        self.db_of = {e.path: e.db for _, entries in pls for e in entries}   # a file's playlist, for lists that lack it
         saves = save_names((self.source.SAVES,)); self.hidden = 0
         for name, entries in sorted(pls, key=lambda kv: (ORDER.get(kv[0], 99), kv[0])):
             games = [Game(*e) for e in entries]
@@ -117,10 +118,14 @@ class Library:
             ranked.append(((min(len(newer), len(rec)) - 0.5, -r.get("t", 0)), g))
         return [g for _, g in sorted(ranked, key=lambda x: x[0])]
 
+    def with_db(self, e):
+        """RetroArch records games it ran itself without their playlist (so without box art): look it up by file."""
+        return e if e.db else e._replace(db=self.db_of.get(e.path, ""))
+
     def refresh_specials(self):
         self.systems = [s for s in self.systems if not s["special"]]
-        hist = [Game(*e) for e in self.source.history()]
-        fav = [Game(*e) for e in self.source.favorites()]
+        hist = [Game(*self.with_db(e)) for e in self.source.history()]
+        fav = [Game(*self.with_db(e)) for e in self.source.favorites()]
         fav = dedupe(fav, set()) if self.one_per_game else fav
         st = self._state() if self.web_index else None
         if st: fav += [self.web_index[p] for p in st["favorites"] if p in self.web_index]

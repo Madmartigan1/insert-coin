@@ -6,8 +6,9 @@ playlist - with each playlist's default core, and the core is chosen when the li
 RetroArch's playlists are read.
 
 Favorites and Recently Played are its own too (favorites.json, history.json), copied from RetroArch's the first
-time. Until RetroArch is no longer needed, every change is also written to RetroArch's lists, so switching back
-to "Library: RetroArch" shows the same favorites and games."""
+time. Until RetroArch is no longer needed the two are kept in step both ways: with "Library: Insert Coin" every
+change is also written to RetroArch's lists, and with "Library: RetroArch" to Insert Coin's (once they exist), so
+either library shows the same favorites and games."""
 import json, os, time
 from paths import FAVORITES, HISTORY, LIBRARY
 from insertcoin.logs import log
@@ -38,6 +39,29 @@ def import_list(ra_path, path):
     save(path, {"version": VERSION, "imported_from": "retroarch", "items": items})
     log.info("Library: imported %d items from %s into %s", len(items), ra_path, path)
     return len(items)
+
+
+def readable_list(path):
+    """An own list (favorites.json / history.json) if it is there and readable, else None."""
+    d = read_json(path)
+    return d if isinstance(d, dict) and d.get("version") == VERSION and isinstance(d.get("items"), list) else None
+
+
+def item(g):
+    return {"label": g.label, "path": g.path, "core": g.core or None, "db": g.db or ""}
+
+
+def star(doc, g, on):
+    """Star or unstar a game in a favorites list. Unstarring removes every copy with its path or its (db, label)."""
+    items = doc["items"]
+    same = lambda it: it.get("path") == g.path or ((it.get("db") or ""), it.get("label")) == ((g.db or ""), g.label)
+    if not on: items[:] = [it for it in items if not same(it)]
+    elif not any(it.get("path") == g.path for it in items): items.append(item(g))
+
+
+def put_first(doc, g):
+    """Put a game at the top of a history list (kept to 200)."""
+    doc["items"] = ([item(g)] + [it for it in doc["items"] if it.get("path") != g.path])[:200]
 
 
 def import_retroarch(ra=None):
@@ -84,9 +108,8 @@ class OwnLibrary:
     def _list(self, path, ra_path):
         """One of the own lists, copied from RetroArch's the first time; raises LibraryError if it can't be read."""
         if not os.path.exists(path): import_list(ra_path, path)
-        d = read_json(path)
-        if not isinstance(d, dict) or d.get("version") != VERSION or not isinstance(d.get("items"), list):
-            raise LibraryError(f"{path} can't be read")
+        d = readable_list(path)
+        if d is None: raise LibraryError(f"{path} can't be read")
         return d
 
     def _entries(self, items):
@@ -97,10 +120,6 @@ class OwnLibrary:
             c = g.get("core")
             out.append(Entry(g["label"], g["path"], c if c and os.path.exists(c) else self.ra.defaults.get(g.get("db") or ""), g.get("db") or ""))
         return out
-
-    @staticmethod
-    def _item(g):
-        return {"label": g.label, "path": g.path, "core": g.core or None, "db": g.db or ""}
 
     def _mirror(self, what, fn):
         """Write a change to RetroArch's list too; Insert Coin's own list already has it if this fails."""
@@ -118,10 +137,7 @@ class OwnLibrary:
 
     def set_favorite(self, g, on):
         """Star or unstar a game. Unstarring removes every copy with its path or its (db, label)."""
-        items = self.fav["items"]
-        same = lambda it: it.get("path") == g.path or ((it.get("db") or ""), it.get("label")) == ((g.db or ""), g.label)
-        if not on: items[:] = [it for it in items if not same(it)]
-        else: items.append(self._item(g))
+        star(self.fav, g, on)
         save(FAVORITES, self.fav)
         def ra():
             self.ra.favorites()                                     # RetroArch's list as it is now, then the change
@@ -133,7 +149,7 @@ class OwnLibrary:
 
     def _add_own_history(self, g):
         d = self._list(HISTORY, RetroArch.HISTORY)
-        d["items"] = ([self._item(g)] + [it for it in d["items"] if it.get("path") != g.path])[:200]
+        put_first(d, g)
         save(HISTORY, d)
 
     def add_history(self, g):
@@ -150,11 +166,35 @@ class LibraryError(Exception):
     pass
 
 
+class RetroArchKeepingOwn(RetroArch):
+    """The source behind "Library: RetroArch": RetroArch's playlists and lists, exactly as before. Stars and games
+    played are also written to Insert Coin's own lists if they exist and can be read (never created or repaired
+    here), so they still match when the library is switched back to Insert Coin."""
+    def _own(self, path, change):
+        try:
+            d = readable_list(path)
+            if d is None: return
+            change(d); save(path, d)
+        except Exception as e: log.warning("Could not update %s: %s", path, e)
+
+    def set_favorite(self, g, on):
+        super().set_favorite(g, on)
+        self._own(FAVORITES, lambda d: star(d, g, on))
+
+    def add_history(self, g):
+        super().add_history(g)
+        self._own(HISTORY, lambda d: put_first(d, g))
+
+    def played_in_retroarch(self, g):
+        """RetroArch already put the game in its own history; only Insert Coin's needs it."""
+        self._own(HISTORY, lambda d: put_first(d, g))
+
+
 def open_source(kind):
     """The source for the "library" setting: ("insertcoin" or "retroarch", source, a note for the user or None).
     The note is "imported" the first time (the app words it, counting the games it shows) or a fallback message.
     Insert Coin's own library is imported from RetroArch the first time; if it can't be used, RetroArch is."""
-    if kind != "insertcoin": return "retroarch", RetroArch(), None
+    if kind != "insertcoin": return "retroarch", RetroArchKeepingOwn(), None
     note = None
     try:
         if not os.path.exists(LIBRARY):
@@ -162,4 +202,4 @@ def open_source(kind):
         return "insertcoin", OwnLibrary(), note
     except Exception as e:
         log.warning("Insert Coin's own library can't be used (%s): using RetroArch's playlists", e)
-        return "retroarch", RetroArch(), "Insert Coin's library couldn't be read - showing RetroArch's playlists"
+        return "retroarch", RetroArchKeepingOwn(), "Insert Coin's library couldn't be read - showing RetroArch's playlists"

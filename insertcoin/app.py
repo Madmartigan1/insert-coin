@@ -388,6 +388,9 @@ def main():
     try:
         App(windowed="--windowed" in a, shot=shot).run()
         log.info("Insert Coin closed")
+    except KeyboardInterrupt:                                      # Ctrl+C in the terminal: an ordinary way to close it
+        log.info("Insert Coin closed (Ctrl+C in the terminal)")
+        raise SystemExit(130)
     except BaseException as e:
         if not isinstance(e, SystemExit): log.exception("Insert Coin stopped because of an error")
         raise
