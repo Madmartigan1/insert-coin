@@ -37,15 +37,97 @@ class Import(unittest.TestCase):
         wave = next(g for s in Library(source=OwnLibrary()).systems for g in s["games"] if g.label == "Wavebreaker (USA)")
         self.assertEqual(wave.core, f"{S.CORES}/missing_libretro.so")
 
-    def test_favorites_and_history_still_retroarchs(self):
+
+
+def find(lib, label, sid=S.NES):
+    return next(g for s in lib.systems if s["id"] == sid for g in s["games"] if g.label == label)
+
+
+def labels(lib, sid):
+    return [g.label for g in next((s for s in lib.systems if s["id"] == sid), {"games": []})["games"]]
+
+
+class FavoritesAndHistory(unittest.TestCase):
+    """Insert Coin's own lists: copied from RetroArch's once, then kept by Insert Coin and written to both."""
+    def setUp(self):
+        S.sample_library()
+        self.star = S.rom("nes/Star Pilot (USA).zip") + "#Star Pilot (USA).nes"
+        self.copy = S.rom("nes/best-of/Star Pilot (USA).zip") + "#Star Pilot (USA).nes"
+        S.write(RetroArch.FAVORITES, {"version": "1.5", "items": [
+            {"path": self.copy, "label": "Star Pilot (USA)", "core_path": "DETECT", "db_name": S.NES + ".lpl"},
+            {"path": f"{S.ROMS}/gone.nes", "label": "Gone", "db_name": S.NES + ".lpl"}]})
+        S.write(RetroArch.HISTORY, {"version": "1.5", "items": [
+            {"path": f"{S.ROMS}/nes/Turbo Tanks II (USA).nes", "label": "Turbo Tanks II (USA)", "core_path": "DETECT",
+             "db_name": S.NES + ".lpl"}]})
         import_retroarch()
-        lib = Library(source=OwnLibrary())
-        g = next(g for s in lib.systems if s["id"] == S.NES for g in s["games"] if g.label == "Wavebreaker (USA)")
-        self.assertTrue(lib.toggle_favorite(g))
-        self.assertEqual(S.read(RetroArch.FAVORITES)["items"][0]["path"], g.path)
-        lib.add_history(g)
-        lib.refresh_specials()
-        self.assertEqual(next(s for s in lib.systems if s["id"] == "recent")["games"][0].core, self.mesen)
+
+    def both(self):
+        return Library(source=OwnLibrary()), Library(source=RetroArch())
+
+    def test_copied_from_retroarch_the_first_time(self):
+        own, ra = self.both()
+        self.assertEqual(dump(own), dump(ra))                               # same Favorites and Recently Played
+        self.assertEqual(labels(own, "favorites"), ["Star Pilot (USA)"])
+        self.assertTrue(own.is_fav(find(own, "Star Pilot (USA)")))         # any copy counts
+        self.assertEqual(len(S.read(paths.FAVORITES)["items"]), 2)           # kept as RetroArch had them, gone or not
+        self.assertEqual(S.read(paths.HISTORY)["items"][0]["label"], "Turbo Tanks II (USA)")
+
+    def test_star_and_unstar_written_to_both(self):
+        own, ra = self.both()
+        g = find(own, "Wavebreaker (USA)")
+        self.assertTrue(own.toggle_favorite(g))
+        self.assertIn(g.path, [it["path"] for it in S.read(paths.FAVORITES)["items"]])
+        self.assertIn(g.path, [it["path"] for it in S.read(RetroArch.FAVORITES)["items"]])
+        own.refresh_specials(); ra.refresh_specials()
+        self.assertEqual(labels(own, "favorites"), ["Star Pilot (USA)", "Wavebreaker (USA)"])
+        self.assertEqual(labels(own, "favorites"), labels(ra, "favorites"))
+        self.assertFalse(own.toggle_favorite(find(own, "Star Pilot (USA)")))   # unstarring removes every copy
+        own.refresh_specials(); ra.refresh_specials()
+        self.assertEqual(labels(own, "favorites"), ["Wavebreaker (USA)"])
+        self.assertEqual(labels(ra, "favorites"), ["Wavebreaker (USA)"])
+
+    def test_own_list_is_kept_if_retroarchs_goes(self):
+        Library(source=OwnLibrary())
+        os.remove(RetroArch.FAVORITES); os.remove(RetroArch.HISTORY)
+        own = Library(source=OwnLibrary())
+        self.assertEqual(labels(own, "favorites"), ["Star Pilot (USA)"])
+        self.assertEqual(labels(own, "recent"), ["Turbo Tanks II (USA)"])
+        self.assertFalse(own.toggle_favorite(find(own, "Star Pilot (USA)")))   # and RetroArch's is written again
+        self.assertEqual(S.read(RetroArch.FAVORITES)["items"], [])
+
+    def test_history_newest_first_kept_to_200_and_written_to_both(self):
+        own, _ = self.both()
+        S.write(paths.HISTORY, {"version": 1, "items": [{"label": str(i), "path": f"/r/{i}.nes", "core": None, "db": ""}
+                                                        for i in range(250)]})
+        a, b = find(own, "Wavebreaker (USA)"), find(own, "Turbo Tanks II (USA)")
+        for g in (a, b, a): own.add_history(g)
+        items = S.read(paths.HISTORY)["items"]
+        self.assertEqual(len(items), 200)
+        self.assertEqual([it["label"] for it in items[:2]], ["Wavebreaker (USA)", "Turbo Tanks II (USA)"])
+        self.assertEqual([it["label"] for it in S.read(RetroArch.HISTORY)["items"]], ["Wavebreaker (USA)", "Turbo Tanks II (USA)"])
+        own.refresh_specials()
+        self.assertEqual(labels(own, "recent"), ["Wavebreaker (USA)", "Turbo Tanks II (USA)"])
+        self.assertEqual(find(own, "Wavebreaker (USA)", "recent").core, self.mesen_core())
+
+    def test_played_in_retroarch(self):
+        """RetroArch writes its own history: only Insert Coin's is added to, and the RetroArch source does nothing."""
+        own, ra = self.both()
+        before = S.read(RetroArch.HISTORY)
+        own.played_in_retroarch(find(own, "Wavebreaker (USA)"))
+        ra.played_in_retroarch(find(ra, "Wavebreaker (USA)"))
+        self.assertEqual(S.read(RetroArch.HISTORY), before)
+        self.assertEqual(S.read(paths.HISTORY)["items"][0]["label"], "Wavebreaker (USA)")
+
+    def test_a_damaged_list_falls_back_and_is_left_alone(self):
+        Library(source=OwnLibrary())
+        with open(paths.FAVORITES, "w") as f: f.write("[broken")
+        kind, source, note = open_source("insertcoin")
+        self.assertEqual(kind, "retroarch")
+        self.assertIn("couldn't be read", note)
+        with open(paths.FAVORITES) as f: self.assertEqual(f.read(), "[broken")
+
+    def mesen_core(self):
+        return f"{S.CORES}/mesen_libretro.so"
 
 
 class Choosing(unittest.TestCase):
@@ -82,7 +164,7 @@ class MenuSwitch(unittest.TestCase):
         app.screen_mode = "quit"; app.quit_sel = app.POWER_MENU.index("Library: RetroArch"); app.accept()
         self.assertEqual(app.lib_kind, "insertcoin")
         self.assertIn("Library: Insert Coin (beta)", app.POWER_MENU)
-        self.assertEqual(json.load(open(f"{S.TMP}/config/settings.json"))["library"], "insertcoin")
+        self.assertEqual(S.read(f"{S.TMP}/config/settings.json")["library"], "insertcoin")
         self.assertIn("imported", app.toast[0])
         self.assertEqual(dump(app.lib), before)
         shown = sum(len(s["games"]) for s in app.lib.systems if not s["special"])
@@ -90,7 +172,7 @@ class MenuSwitch(unittest.TestCase):
         self.assertIn(f" - {shown} games (imported", app.toast[0])           # the games it shows, not the entries
         app.accept()                                                         # and back to RetroArch
         self.assertEqual(app.lib_kind, "retroarch")
-        self.assertEqual(json.load(open(f"{S.TMP}/config/settings.json"))["library"], "retroarch")
+        self.assertEqual(S.read(f"{S.TMP}/config/settings.json")["library"], "retroarch")
         app.draw()
 
     def test_first_switch_in_show_all_counts_entries(self):

@@ -185,3 +185,7 @@ class Library:
     def add_history(self, g):
         """Put a game at the top of Recently Played (the built-in player's job; RetroArch does it itself)."""
         self.source.add_history(g)
+
+    def played_in_retroarch(self, g):
+        """RetroArch ran a game (and added it to its own history): a source with its own history adds it there."""
+        if hasattr(self.source, "played_in_retroarch"): self.source.played_in_retroarch(g)
