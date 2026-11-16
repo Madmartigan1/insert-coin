@@ -4,6 +4,37 @@ All notable changes to Insert Coin. Versions follow [semantic versioning](https:
 before 1.0, minor versions add features and patch versions fix bugs.
 Each version is also a [GitHub Release](https://github.com/Madmartigan1/insert-coin/releases).
 
+## [0.5.0] — 2026-11-16 · "Game select"
+
+### Added
+- **Search.** Press **R3** (or `/` on a keyboard) to type with the pad on an on-screen keyboard;
+  every word you type must start a word of the game's name, and Roman numerals match digits
+  ("2" finds "II"). Results from every system appear on a Search tile at the start of the
+  carousel.
+- **Insert Coin's own library (beta).** In the **B** menu, *Library: Insert Coin* copies your
+  RetroArch playlists into Insert Coin's own list the first time, then reads from it. Favorites
+  and Recently Played are kept in Insert Coin's own lists too, and still written to RetroArch's,
+  so both stay in step whichever library you use. *Library: RetroArch* works as before.
+- **Scanning for games (beta).** `insert-coin --scan` looks through your game folders and reports,
+  system by system, the games that aren't in your library yet. It recognises them by checksum and
+  arcade set name from RetroArch's databases, sets copies and BIOS files apart, and changes
+  nothing. Later scans only read what changed.
+- `insert-coin --scan --add` test-starts each game found in the built-in player, with no window
+  or sound, and adds the ones that start to Insert Coin's own library. RetroArch's playlists are
+  not changed, the library as it was is kept beside it, and games left out are listed with the
+  reason in `scan-not-added.json` (nothing is deleted). Arcade sets are tried with every arcade
+  core, and Mega Drive games with PicoDrive when BlastEm can't read them. `--retry` gives games
+  left out for a black screen more starts, since some start only some of the time.
+- `sync_thumbnails.py` also fetches box art for the games in Insert Coin's own library.
+
+### Changed
+- The Mega Drive tile is now called "Mega Drive / Genesis".
+
+### Fixed
+- Games recorded by RetroArch in Recently Played or Favorites had no box art, year or publisher.
+- Pressing Ctrl+C in the terminal of a windowed Insert Coin was logged as an error; it now closes
+  quietly.
+
 ## [0.4.5] — 2026-11-13 · "Extra life"
 
 ### Fixed
