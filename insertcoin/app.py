@@ -393,7 +393,8 @@ def main():
         if "--add" in a:
             from insertcoin import adding
             print("\nTest-starting the games found (60 seconds of game time each, no window or sound)...")
-            print(adding.summary(adding.add_found(report, progress=lambda n, t: print(f"  {n:,} of {t:,}...", end="\r", flush=True))))
+            print(adding.summary(adding.add_found(report, retry="--retry" in a,
+                                                    progress=lambda n, t: print(f"  {n:,} of {t:,}...", end="\r", flush=True))))
         return
     try:
         App(windowed="--windowed" in a, shot=shot).run()

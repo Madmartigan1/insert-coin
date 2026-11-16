@@ -117,6 +117,28 @@ class Adding(unittest.TestCase):
         self.assertIn("Dark Run (USA)", self.games(NES))
         self.assertEqual(r["added"][NES], 3)
 
+    def test_retry_gives_black_screen_games_more_starts(self):
+        adding.add_found(report(), starter=FakeStarts(fails=["Dark Run"]), workers=1)       # black twice: left out
+        calls = []
+        def starter(core, rom, env):
+            calls.append(os.path.basename(rom))
+            return calls.count("Dark Run (USA).nes") == 5, "black screen for 60 seconds"
+        r = adding.add_found(report(), starter=starter, workers=1, retry=True)
+        self.assertEqual(calls, ["Dark Run (USA).nes"] * 5)                     # only the black-screen game, until it starts
+        self.assertIn("Dark Run (USA)", self.games(NES))
+        self.assertEqual((r["added"], r["retried"]), ({NES: 1}, 1))
+        self.assertNotIn("Dark Run (USA)", [g["name"] for g in r["not_added"]])
+        self.assertIn("got up to 6 starts", adding.summary(r))
+
+    def test_retry_gives_up_after_the_last_start(self):
+        adding.add_found(report(), starter=FakeStarts(fails=["Dark Run"]), workers=1)
+        again = FakeStarts(fails=["Dark Run"])
+        r = adding.add_found(report(), starter=again, workers=1, retry=True)
+        self.assertEqual(again.calls, [("mesen_libretro.so", "Dark Run (USA).nes")] * adding.RETRY_STARTS)
+        self.assertEqual((r["added"], r["backup"]), ({}, None))
+        self.assertIn("Dark Run (USA)", [g["name"] for g in r["not_added"]])
+        self.assertEqual(adding.add_found(report(), starter=again, workers=1)["started_now"], 0)   # no retry: cached
+
     def test_games_added_earlier_are_tested_again_when_the_rules_change(self):
         adding.add_found(report(), starter=FakeStarts(fails=["Dark Run"]), workers=1)
         listed_before = [g for g in self.games(NES).values() if not g.get("added")]

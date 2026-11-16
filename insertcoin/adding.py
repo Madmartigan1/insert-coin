@@ -13,7 +13,9 @@ change, and taken out of the library again if they now fail (their files stay wh
 
 Games that fail are never deleted: they are listed, with the reason, in scan-not-added.json. Games whose core
 the built-in player can't run (Nintendo 64) are listed there as "not tested" for now. Results are kept by file
-size and time (and the cores tried), so running it again only tests what is new or changed."""
+size and time (and the cores tried), so running it again only tests what is new or changed. With retry, the
+games left out for a black screen are started again, up to RETRY_STARTS times each, and added if one start
+shows something."""
 import os, shutil, subprocess, sys, tempfile, time
 from concurrent.futures import ThreadPoolExecutor
 from paths import APPDIR, CACHE, HERE, LIBRARY, RA, SYSTEM
@@ -30,6 +32,7 @@ RESULTS = f"{CACHE}/test-starts.json"                                   # path -
 FRAMES = 3600                                                           # 60 seconds of game time
 PRESSES = ("start@300-306", "a@900-906", "b@1500-1506", "start@2100-2106", "a@2700-2706", "b@3300-3306")
 TIMEOUT = 180                                                           # seconds of real time for one test start
+RETRY_STARTS = 6                                                        # starts per core for a black-screen game, with retry
 # arcade sets: the playlist's own core first, then the other arcade cores (a set may only run in one of them)
 ARCADE_CORES = {"MAME 2003-Plus": ("mame2003_plus_libretro.so", "mame2003_libretro.so", "fbneo_libretro.so"),
                 "FBNeo - Arcade Games": ("fbneo_libretro.so", "mame2003_plus_libretro.so", "mame2003_libretro.so")}
@@ -87,9 +90,10 @@ def sandbox():
     return tmp, env
 
 
-def add_found(report, starter=test_start, workers=None, progress=None):
-    """Test-start every candidate in the report, add those that start to library.json, list the rest.
-    Returns a summary: {"added": {system: n}, "not_added": [...], "tested": n, "backup": path or None}."""
+def add_found(report, starter=test_start, workers=None, progress=None, retry=False):
+    """Test-start every candidate in the report, add those that start to library.json, list the rest. With retry,
+    games left out earlier for a black screen get up to RETRY_STARTS starts per core.
+    Returns a summary: {"added": {system: n}, "not_added": [...], "tested": n, "retried": n, "backup": path or None}."""
     t0 = time.time()
     if not os.path.exists(LIBRARY): import_retroarch()
     doc = read_json(LIBRARY)
@@ -109,10 +113,14 @@ def add_found(report, starter=test_start, workers=None, progress=None):
     def still_good(sy, path):                       # tested before: same file, same cores, same rules
         k = known.get(path)
         return k and k.get("file") == stamp(path) and k.get("tries") == cores_to_try(sy, defaults) and k.get("rules") == RULES
-    results, jobs = {}, []
+    def was_black(k):                                # left out because a core showed only a black screen
+        return not k["passed"] and (k.get("black") or k.get("why", "").startswith("black"))
+    results, jobs, retried = {}, [], set()
     for sy, path, label in todo:
-        if still_good(sy, path): results[path] = known[path]
-        else: jobs.append((sy, path, label))
+        if still_good(sy, path) and not (retry and was_black(known[path])): results[path] = known[path]
+        else:
+            jobs.append((sy, path, label))
+            if retry and still_good(sy, path): retried.add(path)
     def judged_now(path):                            # added by an earlier run: tested again only if the file or rules changed
         k = known.get(path)
         return k and k.get("file") == stamp(path) and k.get("rules") == RULES
@@ -126,17 +134,22 @@ def add_found(report, starter=test_start, workers=None, progress=None):
         if not tries or not is_builtin(tries[0]):
             return path, {"file": stamp(path), "tries": tries, "rules": RULES, "passed": False, "core": tries[0] if tries else None,
                           "why": "not tested: the built-in player can't run this system's core yet"}
-        why, first, tried = "no core for this system", None, []
+        why, first, tried, black = "no core for this system", None, [], False
+        starts = RETRY_STARTS if path in retried else 2       # some cores start with random memory: black isn't final
         for core in tries:
             if not os.path.exists(core): why = f"core not installed: {core_file(core)}"; continue
             ok, why = starter(core, path, env)
-            if not ok and why.startswith("black"):                 # once more: some cores start with random memory
+            for _ in range(starts - 1):
+                if ok or not why.startswith("black"): break
+                black = True
                 ok, why = starter(core, path, env)
             if ok: return path, {"file": stamp(path), "tries": tries, "rules": RULES, "passed": True, "core": core}
+            black = black or why.startswith("black")
             tried.append(core_file(core).replace("_libretro.so", ""))
             first = first or why                              # the reason its own core gave is the one that matters
         if first and len(tried) > 1: why = f"{first} (also tried: {', '.join(tried[1:])})"
-        return path, {"file": stamp(path), "tries": tries, "rules": RULES, "passed": False, "core": tries[0], "why": why}
+        return path, {"file": stamp(path), "tries": tries, "rules": RULES, "passed": False, "core": tries[0], "why": why,
+                      "black": black}
     try:
         with ThreadPoolExecutor(workers or max(1, (os.cpu_count() or 2) - 1)) as pool:
             for n, (path, res) in enumerate(pool.map(run, jobs), 1):
@@ -180,13 +193,15 @@ def add_found(report, starter=test_start, workers=None, progress=None):
              time.time() - t0, sum(added.values()), sum(taken_out.values()), len(not_added),
              f"; backup {backup}" if backup else "")
     return {"added": added, "taken_out": taken_out, "not_added": not_added, "tested": len(todo) + len(recheck),
-            "started_now": len(jobs), "backup": backup}
+            "started_now": len(jobs), "retried": len(retried), "backup": backup}
 
 
 def summary(result):
     from insertcoin.systems import FRIENDLY
     name = lambda sy: FRIENDLY.get(sy, (sy,))[0]
     lines = [f"Test-started {result['tested']:,} games ({result['started_now']:,} now, the rest from earlier runs)."]
+    if result.get("retried"):
+        lines.append(f"{result['retried']:,} of them had shown a black screen before and got up to {RETRY_STARTS} starts each.")
     if result["added"]:
         lines += ["", "Added to Insert Coin's library (B menu > Library: Insert Coin):"]
         lines += [f"  {name(sy)}: {n:,}" for sy, n in sorted(result["added"].items(), key=lambda x: name(x[0]))]

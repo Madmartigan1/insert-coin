@@ -411,6 +411,7 @@ Start **Insert Coin** from your applications menu, or run:
 | `--shot DIR` | Render sample screens to PNG files in `DIR` and exit — no display needed (for testing) |
 | `--scan` | Look through your game folders and report the games that aren't in your library yet, system by system — **changes nothing** (beta; see below) |
 | `--scan --add` | The same, then test-start each game found and add the ones that start to Insert Coin's own library (beta; see below) |
+| `--scan --add --retry` | The same, and give the games left out for a black screen up to 6 more starts each |
 
 ### Scanning for games (beta)
 
@@ -438,7 +439,9 @@ can't read `.smd` files); the core that starts a game is remembered. Games are a
 own library only (B menu → *Library: Insert Coin*); RetroArch's playlists aren't changed, and the library as it
 was before is kept beside it (`library.json.pre-scan-…`). Games left out are never deleted: they're listed with
 the reason in `~/.local/share/insert-coin/scan-not-added.json`. Nintendo 64 games are listed there as not tested
-for now, since the built-in player can't run them yet. Running it again only tests what is new or changed.
+for now, since the built-in player can't run them yet. Running it again only tests what is new or changed. A
+few games start only some of the time (the console's memory is random at power-on); `--scan --add --retry`
+starts the games left out for a black screen again, up to 6 times each, and adds those that show something.
 
 **Tip:** close RetroArch before starting Insert Coin. Two copies of RetroArch running at once
 can overwrite each other's settings.
