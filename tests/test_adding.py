@@ -74,6 +74,15 @@ class Adding(unittest.TestCase):
         self.assertIn("mame2003_plus_libretro.so", calls)                                       # tried first
         self.assertNotIn("mame2003_libretro.so", calls)                                         # not installed: skipped
 
+    def test_the_reason_given_is_the_playlists_own_core(self):
+        def starter(core, rom, env):
+            if "galaxy" not in rom: return True, "started"
+            return False, "missing ROM files" if "mame2003_plus" in core else "could not be loaded: driver not found"
+        r = adding.add_found(report(), starter=starter, workers=1)
+        why = next(g["why"] for g in r["not_added"] if g["name"] == "Galaxy Run")
+        self.assertEqual(why, "missing ROM files (also tried: fbneo)")
+        self.assertIn("(missing ROM files: 1, not tested: 1)", adding.summary(r))
+
     def test_mega_drive_games_get_a_second_core(self):
         S.core("blastem_libretro.so"); S.core("picodrive_libretro.so")
         rep = {"systems": {"Sega - Mega Drive - Genesis": {"listed": 0, "by_type": [], "copies": [], "not_games": [],
@@ -107,6 +116,22 @@ class Adding(unittest.TestCase):
         self.assertEqual(calls.count("Dark Run (USA).nes"), 2)
         self.assertIn("Dark Run (USA)", self.games(NES))
         self.assertEqual(r["added"][NES], 3)
+
+    def test_games_added_earlier_are_tested_again_when_the_rules_change(self):
+        adding.add_found(report(), starter=FakeStarts(fails=["Dark Run"]), workers=1)
+        listed_before = [g for g in self.games(NES).values() if not g.get("added")]
+        stricter = FakeStarts(fails=["Dark Run", "Comet Run (USA)"])
+        with mock.patch.object(adding, "RULES", adding.RULES + 1):
+            r = adding.add_found(report(), starter=stricter, workers=1)
+        nes = self.games(NES)
+        self.assertNotIn("Comet Run (USA)", nes)                                                # out again
+        self.assertIn("Comet Run (Hack)", nes)                                                  # still passes
+        self.assertEqual([g for g in nes.values() if not g.get("added")], listed_before)        # yours: untouched
+        self.assertEqual(r["taken_out"], {NES: 1})
+        self.assertIn("Comet Run (USA)", [g["name"] for g in r["not_added"]])
+        self.assertTrue(os.path.exists(r["backup"]))
+        self.assertTrue(os.path.exists(S.rom("new/Comet Run (USA).zip")))                       # never deleted
+        self.assertIn(("mesen_libretro.so", "Comet Run (Hack).nes"), stricter.calls)            # all re-judged
 
     def test_a_second_run_tests_nothing_and_adds_nothing_twice(self):
         adding.add_found(report(), starter=FakeStarts(fails=["Dark Run"]), workers=1)
@@ -151,6 +176,9 @@ class TestStart(unittest.TestCase):
         ok, why = self.answer("[ERROR] The player stopped with an error: ValueError()\n", rc=1)
         self.assertTrue(why.startswith("stopped with an error"), why)
         self.assertFalse(self.answer(timeout=True)[0])
+        ok, why = self.answer("[ERROR] [FBNeo] ROM at index 3 with name x and CRC 0x1234 is required\n"
+                              "[INFO] Probe: 120 of 120 frames lit\n")                         # its error screen
+        self.assertEqual((ok, why.split(":")[0]), (False, "missing ROM files"))
 
 
 if __name__ == "__main__":

@@ -380,8 +380,9 @@ cp ~/.local/share/applications/insert-coin.desktop ~/.config/autostart/
 ## Getting artwork: `sync_thumbnails.py`
 
 Insert Coin uses RetroArch's thumbnails. `sync_thumbnails.py` fills in whatever is missing for
-**all** your playlists in one go, from `thumbnails.libretro.com` — the same source RetroArch's
-built-in updater uses.
+**all** your playlists in one go, and for the games in Insert Coin's own library (such as those
+added by `--scan --add`), from `thumbnails.libretro.com` — the same source RetroArch's built-in
+updater uses.
 
 - Tries the exact game name first, then a careful fuzzy match that ignores tags such as
   `(USA)` or `[!]` and prefers the same region as your copy.
@@ -428,7 +429,10 @@ runs in the built-in player for 60 seconds of game time, without a window, sound
 Start, A and B pressed along the way; that takes a few seconds per game. A game is added if any of its frames
 shows something, so games without box art or with a dark title screen still count. It is left out only if it
 can't be loaded, the player stops with an error, or the screen stays black the whole time (a black screen gets a
-second start, since some cores fill the console's memory with random values at power-on). Arcade sets are also
+second start, since some cores fill the console's memory with random values at power-on). FinalBurn Neo
+shows its own error screen for an arcade set with files missing, so a set it reports files missing for is left
+out too. When these rules improve, games added by an earlier run are tested again, and taken out of the
+library if they no longer pass (their files stay where they are). Arcade sets are also
 tried with the other arcade cores, and Mega Drive games with PicoDrive when BlastEm can't start them (it
 can't read `.smd` files); the core that starts a game is remembered. Games are added to Insert Coin's
 own library only (B menu → *Library: Insert Coin*); RetroArch's playlists aren't changed, and the library as it
