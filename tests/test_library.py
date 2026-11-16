@@ -21,7 +21,7 @@ class OnePerGame(unittest.TestCase):
 
     def test_systems_in_order_and_empty_ones_hidden(self):
         ids = [s["id"] for s in self.lib.systems]
-        self.assertEqual(ids, [S.ARCADE, S.NES, "Homebrew - Console"])     # known systems first, unknown last
+        self.assertEqual(ids, ["search", S.ARCADE, S.NES, "Homebrew - Console"])   # Search, known systems, unknown last
         nes = system(self.lib, S.NES)
         self.assertEqual((nes["name"], nes["maker"]), ("NES", "Nintendo"))
         other = system(self.lib, "Homebrew - Console")
@@ -134,6 +134,19 @@ class History(unittest.TestCase):
         items = S.read(RetroArch.HISTORY)["items"]
         self.assertEqual(len(items), 200)
         self.assertEqual(items[0]["label"], "Wavebreaker (USA)")
+
+
+class ListsWithoutPlaylist(unittest.TestCase):
+    def test_playlist_found_by_file_for_box_art(self):
+        """RetroArch records the games it runs itself without their playlist: Insert Coin finds it by the file."""
+        S.sample_library()
+        path = f"{S.ROMS}/nes/Turbo Tanks II (USA).nes"
+        S.write(RetroArch.HISTORY, {"version": "1.5", "items": [{"path": path, "label": "", "db_name": "",
+                                                                 "core_path": f"{S.CORES}/mesen_libretro.so"}]})
+        lib = Library(one_per_game=True)
+        g = system(lib, "recent")["games"][0]
+        self.assertEqual((g.label, g.db), ("Turbo Tanks II (USA)", S.NES + ".lpl"))
+        self.assertIn(f"/thumbnails/{S.NES}/Named_Boxarts/", g.thumb("Named_Boxarts"))
 
 
 class BrowserGames(unittest.TestCase):

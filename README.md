@@ -5,7 +5,7 @@
 Pick a system, scroll through the box art, press **A** to play. No keyboard, no settings menus —
 just your games, the way a console shows them.
 
-> **Status: 0.4.5 — early release.** Tested on Linux Mint 22.3 (Cinnamon, X11) with Xbox-style and
+> **Status: 0.5.0 — early release.** Tested on Linux Mint 22.3 (Cinnamon, X11) with Xbox-style and
 > PlayStation controllers. It hasn't been tried on other
 > setups yet, so expect rough edges and please [report them](CONTRIBUTING.md).
 >
@@ -54,12 +54,17 @@ vice versa.
 ## Features
 
 - **System carousel** — every RetroArch playlist as a tile with a fan of its box art.
-  *Favorites* and *Recently Played* come first. Systems get friendly names
+  *Search*, *Favorites* and *Recently Played* come first. Systems get friendly names
   ("Super Nintendo" instead of "Nintendo - Super Nintendo Entertainment System"), and empty
   playlists are hidden.
 - **Game carousel** — large box art in the middle, the selected game's in-game snapshot blurred
   behind it, and its title screen in a side panel. Year and publisher are shown where
   RetroArch's databases know them. Games without artwork get a clean name card.
+- **Search** — the *Search* tile on the home screen, or **R3** (click the right stick) anywhere in the
+  menus, opens an on-screen keyboard. Type part of a name and the matching games from every system
+  appear as you type: "ninja" finds every game with that word in its name, "nin gai" narrows it
+  down, and numbers match Roman numerals ("2" finds "II"). The results open as a list you can play
+  from, and stay on the Search tile.
 - **Favorites** — press **Y** on any game to add or remove it.
 - **Jump by letter** — **LB / RB** skip through long lists alphabetically.
 - **One entry per game** — the same game copied into several folders is shown once, and its
@@ -90,13 +95,13 @@ vice versa.
 | | |
 |---|---|
 | ![Home screen: a carousel of systems, each with a fan of its box art](docs/screenshots/home.png) | ![Favorites, shared with RetroArch's own favorites list](docs/screenshots/favorites.png) |
-| **Home** — every system, plus Favorites and Recently Played | **Favorites** — press Y on any game |
+| **Home** — every system, plus Search, Favorites and Recently Played | **Favorites** — press Y on any game |
 | ![The Versions list: one game in five versions, the best one first](docs/screenshots/versions.png) | ![The built-in player's pause menu: Resume, Controls, Quit game](docs/screenshots/game_menu.png) |
 | **Versions** — X on a game with more than one | **Game menu** — Select + Start in the built-in player |
 | ![The built-in player's Controls screen: each game button with the controller button that does it](docs/screenshots/game_controls.png) | ![The menu: Resume, Sound, Player, Games, Set up controller, Exit Insert Coin](docs/screenshots/menu.png) |
 | **Controls** — this game's buttons, in the built-in player | **Menu** — B on the home screen |
-| ![Controller set-up: press the button you want for each action](docs/screenshots/controller_setup.png) | |
-| **Controller set-up** — for pads that aren't recognised | |
+| ![Search: an on-screen keyboard, with the matching games listed as you type](docs/screenshots/search.png) | ![Controller set-up: press the button you want for each action](docs/screenshots/controller_setup.png) |
+| **Search** — R3, or the Search tile on the home screen | **Controller set-up** — for pads that aren't recognised |
 
 Button hints follow the controller in your hand — Xbox, PlayStation, Switch / SNES-style, or keyboard:
 
@@ -114,6 +119,12 @@ Button hints follow the controller in your hand — Xbox, PlayStation, Switch / 
 | **Y** | F | Add / remove favorite |
 | **X** | V | Versions — choose a region, revision or translation (games with more than one) |
 | **LB / RB** | Page Up / Page Down | Previous / next letter |
+| **R3** (click the right stick) | / | Search |
+
+**On the search screen:** the D-pad or left stick moves over the keyboard, **A** types a letter,
+**X** deletes one, **Y** adds a space, **Start** (or the on-screen *Search* key) shows the games
+found, and **B** goes back. With a keyboard, just type: Backspace deletes, Enter searches, Esc goes
+back. From the results, **B** returns to the keyboard with your words still there.
 
 **The menu** (**B** on the home screen):
 
@@ -123,6 +134,7 @@ Button hints follow the controller in your hand — Xbox, PlayStation, Switch / 
 | **Sound: On / Off** | Menu sounds |
 | **Player: RetroArch / Built-in (beta)** | Which program plays your games — see [Built-in player](#built-in-player-beta) |
 | **Games: One per game / Show all** | Group copies and versions of a game into one entry, or list every ROM |
+| **Library: RetroArch / Insert Coin (beta)** | Where the list of games comes from: RetroArch's playlists, or Insert Coin's own library. The first time you choose Insert Coin, it copies your RetroArch playlists into its own library (a second or so); after that it reads its own copy. Same games, versions and box art either way. Insert Coin's library keeps its own Favorites and Recently Played too (copied from RetroArch's the first time), and every change is also written to RetroArch's, so switching back shows the same lists. If Insert Coin's library can't be read, it shows RetroArch's playlists and says so |
 | **Set up controller** | Redo the button set-up for an unrecognised pad |
 | **Exit Insert Coin** | Close Insert Coin |
 
@@ -368,8 +380,9 @@ cp ~/.local/share/applications/insert-coin.desktop ~/.config/autostart/
 ## Getting artwork: `sync_thumbnails.py`
 
 Insert Coin uses RetroArch's thumbnails. `sync_thumbnails.py` fills in whatever is missing for
-**all** your playlists in one go, from `thumbnails.libretro.com` — the same source RetroArch's
-built-in updater uses.
+**all** your playlists in one go, and for the games in Insert Coin's own library (such as those
+added by `--scan --add`), from `thumbnails.libretro.com` — the same source RetroArch's built-in
+updater uses.
 
 - Tries the exact game name first, then a careful fuzzy match that ignores tags such as
   `(USA)` or `[!]` and prefers the same region as your copy.
@@ -396,6 +409,39 @@ Start **Insert Coin** from your applications menu, or run:
 |---|---|
 | `--windowed` | Run in a window instead of fullscreen — games too (handy for testing next to a terminal) |
 | `--shot DIR` | Render sample screens to PNG files in `DIR` and exit — no display needed (for testing) |
+| `--scan` | Look through your game folders and report the games that aren't in your library yet, system by system — **changes nothing** (beta; see below) |
+| `--scan --add` | The same, then test-start each game found and add the ones that start to Insert Coin's own library (beta; see below) |
+| `--scan --add --retry` | The same, and give the games left out for a black screen up to 6 more starts each |
+
+### Scanning for games (beta)
+
+`--scan` looks through the folder that holds your games (found from your library) and recognises each game by
+its checksum, read from the zip's index without unpacking it, and arcade games by their set name, using
+RetroArch's databases. It also recognises Mega Drive `.smd` files, NES ROMs with unusual headers and Super
+Nintendo ROMs with a copier header. For each system it reports how many games are already **listed**, how many
+are **new** (recognised but not in your library), how many it could only place **by type** (not in the
+database, such as translations and hacks), and how many are **copies** of games you already have. BIOS and
+enhancement-chip files are set apart. The first scan reads every archive's index (a few minutes for a large
+collection); later scans only read what changed. The full list goes to
+`~/.local/share/insert-coin/scan-report.json`.
+
+`--scan --add` then test-starts every new game and every game placed by type (copies are never added). Each
+runs in the built-in player for 60 seconds of game time, without a window, sound, saves or controllers, with
+Start, A and B pressed along the way; that takes a few seconds per game. A game is added if any of its frames
+shows something, so games without box art or with a dark title screen still count. It is left out only if it
+can't be loaded, the player stops with an error, or the screen stays black the whole time (a black screen gets a
+second start, since some cores fill the console's memory with random values at power-on). FinalBurn Neo
+shows its own error screen for an arcade set with files missing, so a set it reports files missing for is left
+out too. When these rules improve, games added by an earlier run are tested again, and taken out of the
+library if they no longer pass (their files stay where they are). Arcade sets are also
+tried with the other arcade cores, and Mega Drive games with PicoDrive when BlastEm can't start them (it
+can't read `.smd` files); the core that starts a game is remembered. Games are added to Insert Coin's
+own library only (B menu → *Library: Insert Coin*); RetroArch's playlists aren't changed, and the library as it
+was before is kept beside it (`library.json.pre-scan-…`). Games left out are never deleted: they're listed with
+the reason in `~/.local/share/insert-coin/scan-not-added.json`. Nintendo 64 games are listed there as not tested
+for now, since the built-in player can't run them yet. Running it again only tests what is new or changed. A
+few games start only some of the time (the console's memory is random at power-on); `--scan --add --retry`
+starts the games left out for a black screen again, up to 6 times each, and adds those that show something.
 
 **Tip:** close RetroArch before starting Insert Coin. Two copies of RetroArch running at once
 can overwrite each other's settings.
@@ -409,7 +455,7 @@ can overwrite each other's settings.
 | `~/.config/retroarch/playlists/*.lpl` | Your systems and games, and each game's core |
 | `~/.config/retroarch/thumbnails/` | Box art, snapshots, title screens |
 | `~/.config/retroarch/content_history.lpl` | Recently Played |
-| `~/.config/retroarch/database/rdb/*.rdb` | Year and publisher information |
+| `~/.config/retroarch/database/rdb/*.rdb` | Year and publisher information, and (`--scan`) the checksums and arcade set names games are recognised by |
 | `~/.config/insert-coin/browser_games.json` | Your browser and Flash game playlists (optional) |
 
 **Writes:**
@@ -422,7 +468,13 @@ can overwrite each other's settings.
 | `~/.cache/insert-coin/meta/` | Cached year/publisher lookups |
 | `~/.config/insert-coin/controllers.json` | Button set-ups for controllers that aren't recognised automatically |
 | `~/.config/insert-coin/remaps/` | Button layouts you chose for single games in the built-in player (**Controls**) |
-| `~/.config/insert-coin/settings.json` | Your settings: menu sounds, which player, one entry per game or show all |
+| `~/.config/insert-coin/settings.json` | Your settings: menu sounds, which player, one entry per game or show all, which library |
+| `~/.local/share/insert-coin/library.json` | Insert Coin's own game library (**Library: Insert Coin**), copied from your RetroArch playlists the first time you choose it |
+| `~/.local/share/insert-coin/scan-report.json` | What the last `--scan` found |
+| `~/.cache/insert-coin/scan.json` | What each scanned file holds, so later scans only read what changed |
+| `~/.local/share/insert-coin/scan-not-added.json` | Games `--scan --add` found but didn't add, and why (nothing is deleted) |
+| `~/.cache/insert-coin/test-starts.json` | The result of each test start, so later runs only test what is new or changed |
+| `~/.local/share/insert-coin/favorites.json`, `history.json` | Favorites and Recently Played for **Library: Insert Coin**, copied from RetroArch's the first time |
 | `~/.config/insert-coin/played.json` | Favorites and Recently Played for browser games, and the time of each game launch (to place them in Recently Played) |
 | `~/.local/share/insert-coin/browser/` | The browser profile browser games run in |
 | `~/.local/state/insert-coin/browser-last.log` | The browser's output for the last browser game (`browser-previous.log`: the one before) |

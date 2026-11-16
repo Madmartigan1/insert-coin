@@ -5,6 +5,7 @@ from insertcoin import __version__
 from insertcoin.logs import log, start_log
 from insertcoin.web import WebGame
 from insertcoin.library import Library
+from insertcoin.ownlib import open_source
 from insertcoin.cores import not_builtin_systems
 from insertcoin.meta import Meta
 from insertcoin.media import Fonts, Images, Sounds
@@ -25,7 +26,7 @@ class App(Pads, Launcher, Screens):
         self.sfx = Sounds(enabled=self.settings["sound"], start=not shot)
         self.open_display()
         self.fonts = Fonts()
-        self.lib = Library(one_per_game=self.settings["one_per_game"])
+        self.lib = self.make_library()
         self.meta = Meta({s["id"] for s in self.lib.systems if not s["special"]})
         self.img = Images(sync=bool(shot))
         self.pads = {}; self.pad_style = {}                         # device index -> Controller; instance id -> style
@@ -49,7 +50,9 @@ class App(Pads, Launcher, Screens):
         self.toast = None; self.jump = None
         self.prev_bg = None; self.bg_change = 0
         self.hold = {}; self.quit_sel = 1; self.vlist = []; self.vsel = 0
+        self.q = ""; self.kpos = (1, 0); self.preview = []; self.back_to = (self.si, "systems")   # the search screen
         self.clock = pygame.time.Clock()
+        if self.lib_note: self.say(self.library_message(), 4.0)
 
     # -- display / input
     def open_display(self):
@@ -57,6 +60,12 @@ class App(Pads, Launcher, Screens):
         self.screen = pygame.display.set_mode((W, H), flags, vsync=0 if self.shot else 1)
         pygame.display.set_caption("Insert Coin")
         pygame.mouse.set_visible(bool(self.windowed))
+
+    def make_library(self):
+        """The game library from the source the "library" setting names (RetroArch's playlists or Insert Coin's)."""
+        self.lib_kind, source, self.lib_note = open_source(self.settings.get("library"))
+        log.info("Library: %s", "Insert Coin (beta)" if self.lib_kind == "insertcoin" else "RetroArch playlists")
+        return Library(one_per_game=self.settings["one_per_game"], source=source)
 
     # -- current state helpers
     @property
@@ -111,6 +120,7 @@ class App(Pads, Launcher, Screens):
 
     def accept(self):
         if self.screen_mode == "systems":
+            if self.sys["special"] == "search": return self.open_search()
             self.screen_mode = "games"; self.gpos = float(self.cur_gi()); self.sfx.play("select")
         elif self.screen_mode == "games":
             g = self.cur_game()
@@ -124,6 +134,7 @@ class App(Pads, Launcher, Screens):
             elif choice.startswith("Sound"): self.toggle_sound()
             elif choice.startswith("Player"): self.toggle_engine()
             elif choice.startswith("Games"): self.toggle_grouping()
+            elif choice.startswith("Library"): self.toggle_library()
             else: self.sfx.play("select"); self.setup_from_menu()
 
     def toggle_grouping(self):
@@ -132,12 +143,32 @@ class App(Pads, Launcher, Screens):
         try: save_settings(self.settings)
         except Exception as e: self.say(f"Could not save the setting: {e}")
         sid = self.sys["id"] if self.lib.systems else None
-        self.lib = Library(one_per_game=self.settings["one_per_game"]); self.gi = {}
+        self.lib = self.make_library(); self.gi = {}
         self.si = next((i for i, s in enumerate(self.lib.systems) if s["id"] == sid), 0); self.spos = float(self.si)
         self.sfx.play("select")
         total = sum(len(s["games"]) for s in self.lib.systems if not s["special"])
         self.say(f"One entry per game: {total:,} games (other versions under X)" if self.settings["one_per_game"]
                  else f"Showing every ROM: {total:,} entries", 3.0)
+
+    def toggle_library(self):
+        """RetroArch's playlists or Insert Coin's own library (imported from RetroArch the first time)."""
+        self.settings["library"] = "retroarch" if self.settings.get("library") == "insertcoin" else "insertcoin"
+        sid = self.sys["id"] if self.lib.systems else None
+        self.lib = self.make_library(); self.gi = {}
+        if self.lib_kind != self.settings["library"]: self.settings["library"] = self.lib_kind   # it fell back
+        try: save_settings(self.settings)
+        except Exception as e: self.say(f"Could not save the setting: {e}")
+        self.si = next((i for i, s in enumerate(self.lib.systems) if s["id"] == sid), 0); self.spos = float(self.si)
+        self.sfx.play("select")
+        self.say(self.library_message(), 3.0)
+
+    def library_message(self):
+        """What the library switch says: which library, and how many games it shows in the current Games mode."""
+        if self.lib_note and self.lib_note != "imported": return self.lib_note          # it fell back to RetroArch
+        total = sum(len(s["games"]) for s in self.lib.systems if not s["special"])
+        count = f"{total:,} games" if self.settings["one_per_game"] else f"{total:,} entries"
+        if self.lib_kind != "insertcoin": return f"Library: RetroArch playlists - {count}"
+        return f"Library: Insert Coin (beta) - {count}" + (" (imported from RetroArch)" if self.lib_note else "")
 
     def toggle_engine(self):
         self.settings["engine"] = not self.settings.get("engine")
@@ -165,8 +196,62 @@ class App(Pads, Launcher, Screens):
             return
         self.start_setup(iid)
 
+    # -- search: an on-screen keyboard (or the real one); results open in the Search list
+    KEYS = ["1234567890", "QWERTYUIOP", "ASDFGHJKL", "ZXCVBNM", ("Space", "Delete", "Search")]
+
+    def open_search(self):
+        if self.screen_mode not in ("systems", "games") or not any(s["id"] == "search" for s in self.lib.systems): return
+        self.back_to = (self.si, self.screen_mode)
+        self.q = self.lib.query; self.preview = self.lib.search(self.q)
+        self.screen_mode = "search"; self.hold.clear(); self.sfx.play("menu")
+
+    def type_key(self, ch):
+        """Add a letter (or space), delete one, and update the matches shown beside the keyboard."""
+        if ch == "Delete": self.q = self.q[:-1]
+        elif ch == "Space": self.q = self.q + " " if self.q and not self.q.endswith(" ") else self.q
+        elif len(self.q) < 40: self.q += ch.lower()
+        self.preview = self.lib.search(self.q); self.sfx.play("move")
+
+    def run_search(self):
+        """Show what was found in the Search list (on the home screen's Search tile)."""
+        if not self.q.strip(): self.err("Type part of a game's name first"); return
+        found = self.lib.set_search(self.q)
+        if not found: self.err(f"No games found for \u201c{self.q.strip()}\u201d"); return
+        self.si = next(i for i, s in enumerate(self.lib.systems) if s["id"] == "search")
+        self.gi["search"] = 0; self.gpos = 0.0; self.spos = float(self.si)
+        self.screen_mode = "games"; self.sfx.play("select")
+
+    def key_at(self, row, col):
+        keys = self.KEYS[row]; return keys[min(col, len(keys) - 1)]
+
+    def move_key(self, act):
+        """Move on the keyboard; up and down keep to the key nearest the same spot."""
+        row, col = self.kpos
+        if act in ("left", "right"):
+            n = len(self.KEYS[row]); col = (min(col, n - 1) + (1 if act == "right" else -1)) % n
+        else:
+            frac = (min(col, len(self.KEYS[row]) - 1) + 0.5) / len(self.KEYS[row])
+            row = (row + (1 if act == "down" else -1)) % len(self.KEYS)
+            col = min(len(self.KEYS[row]) - 1, int(frac * len(self.KEYS[row])))
+        self.kpos = (row, col); self.sfx.play("move")
+
+    def search_press(self, act):
+        if act in ("left", "right", "up", "down"): self.move_key(act)
+        elif act == "a":
+            k = self.key_at(*self.kpos)
+            self.run_search() if k == "Search" else self.type_key(k)
+        elif act == "x": self.type_key("Delete")
+        elif act == "y": self.type_key("Space")
+        elif act == "start": self.run_search()
+        elif act == "b":
+            self.si, mode = self.back_to; self.screen_mode = "systems" if mode not in ("systems", "games") else mode
+            self.sfx.play("back")
+
     def back(self):
-        if self.screen_mode == "games": self.screen_mode = "systems"; self.sfx.play("back")
+        if self.screen_mode == "games" and self.sys["id"] == "search":    # from the results: back to the keyboard
+            self.back_to = (self.si, "systems"); self.q = self.lib.query; self.preview = self.lib.search(self.q)
+            self.screen_mode = "search"; self.sfx.play("back")
+        elif self.screen_mode == "games": self.screen_mode = "systems"; self.sfx.play("back")
         elif self.screen_mode == "versions": self.screen_mode = "games"; self.sfx.play("back")
         elif self.screen_mode == "systems": self.screen_mode = "quit"; self.quit_sel = 0; self.sfx.play("menu")
         else: self.screen_mode = "systems"; self.sfx.play("back")
@@ -190,6 +275,9 @@ class App(Pads, Launcher, Screens):
         if not self.lib.systems:                                    # empty setup: only "exit" does anything
             if act == "b": self.running = False; log.info("Exit (no games found)")
             return
+        if self.screen_mode == "search": return self.search_press(act)
+        if act == "start": act = "a"                                 # Start chooses, as before, outside search
+        if act == "search": return self.open_search()
         if act in ("left", "right", "up", "down"):
             d = -1 if act in ("left", "up") else 1
             if self.screen_mode == "games" and act in ("up", "down"): d *= 10
@@ -211,13 +299,14 @@ class App(Pads, Launcher, Screens):
     def handle(self, e):
         K = {pygame.K_LEFT: "left", pygame.K_RIGHT: "right", pygame.K_UP: "up", pygame.K_DOWN: "down",
              pygame.K_RETURN: "a", pygame.K_KP_ENTER: "a", pygame.K_BACKSPACE: "b", pygame.K_ESCAPE: "b",
-             pygame.K_f: "y", pygame.K_v: "x", pygame.K_PAGEUP: "lb", pygame.K_PAGEDOWN: "rb"}
+             pygame.K_f: "y", pygame.K_v: "x", pygame.K_PAGEUP: "lb", pygame.K_PAGEDOWN: "rb", pygame.K_SLASH: "search"}
         B = {pygame.CONTROLLER_BUTTON_DPAD_LEFT: "left", pygame.CONTROLLER_BUTTON_DPAD_RIGHT: "right",
              pygame.CONTROLLER_BUTTON_DPAD_UP: "up", pygame.CONTROLLER_BUTTON_DPAD_DOWN: "down",
              pygame.CONTROLLER_BUTTON_A: "a", pygame.CONTROLLER_BUTTON_B: "b", pygame.CONTROLLER_BUTTON_Y: "y",
              pygame.CONTROLLER_BUTTON_X: "x",
              pygame.CONTROLLER_BUTTON_LEFTSHOULDER: "lb", pygame.CONTROLLER_BUTTON_RIGHTSHOULDER: "rb",
-             pygame.CONTROLLER_BUTTON_START: "a", pygame.CONTROLLER_BUTTON_BACK: "b"}
+             pygame.CONTROLLER_BUTTON_START: "start", pygame.CONTROLLER_BUTTON_BACK: "b",
+             pygame.CONTROLLER_BUTTON_RIGHTSTICK: "search"}
         JOY = (pygame.JOYBUTTONDOWN, pygame.JOYBUTTONUP, pygame.JOYHATMOTION, pygame.JOYAXISMOTION)
         jid = getattr(e, "instance_id", None)
         if e.type == pygame.JOYDEVICEADDED: self.pad_plugged()
@@ -240,6 +329,7 @@ class App(Pads, Launcher, Screens):
             elif e.type == pygame.JOYBUTTONDOWN: self.start_setup(jid)
             return
         if e.type == pygame.KEYDOWN: self.style = "keyboard"
+        if self.screen_mode == "search" and e.type == pygame.KEYDOWN and self.type_on_keyboard(e): return
         elif e.type in (pygame.CONTROLLERBUTTONDOWN, pygame.CONTROLLERAXISMOTION) and hasattr(e, "instance_id"):
             if e.type == pygame.CONTROLLERBUTTONDOWN or abs(e.value) > 16000:
                 if e.instance_id in self.pad_style: self.cur_pad, self.style = e.instance_id, self.pad_style[e.instance_id]
@@ -264,6 +354,16 @@ class App(Pads, Launcher, Screens):
             self.pads = {}; self.pad_style = {}; self.pad_quit = {}; self.open_pads()
             if self.style != "keyboard": self.cur_pad, self.style = next(iter(self.pad_style.items()), (None, "keyboard"))
 
+    def type_on_keyboard(self, e):
+        """On the search screen a real keyboard types: letters, digits, space, Backspace, Enter searches.
+        Returns True when the key was used here."""
+        if e.key == pygame.K_BACKSPACE: self.type_key("Delete"); return True
+        if e.key in (pygame.K_RETURN, pygame.K_KP_ENTER): self.run_search(); return True
+        if e.key == pygame.K_SPACE: self.type_key("Space"); return True
+        ch = e.unicode or ""
+        if len(ch) == 1 and ch.isalnum() and ch.isascii(): self.type_key(ch); return True
+        return False
+
     def tick_repeat(self):
         now = time.time()
         for act, t in list(self.hold.items()):
@@ -285,9 +385,23 @@ def main():
     shot = a[a.index("--shot") + 1] if "--shot" in a else None
     if shot: os.environ["SDL_VIDEODRIVER"] = "dummy"; os.environ["SDL_AUDIODRIVER"] = "dummy"
     if not shot: start_log()
+    if "--scan" in a:                    # report what a scan finds (changes nothing); with --add, test-start and add them
+        from insertcoin.scanner import scan, summary
+        print("Scanning your game folders (the first scan reads every archive's index; later ones only what changed)...")
+        report = scan(progress=lambda n: print(f"  {n:,} files...", end="\r", flush=True))
+        print(summary(report))
+        if "--add" in a:
+            from insertcoin import adding
+            print("\nTest-starting the games found (60 seconds of game time each, no window or sound)...")
+            print(adding.summary(adding.add_found(report, retry="--retry" in a,
+                                                    progress=lambda n, t: print(f"  {n:,} of {t:,}...", end="\r", flush=True))))
+        return
     try:
         App(windowed="--windowed" in a, shot=shot).run()
         log.info("Insert Coin closed")
+    except KeyboardInterrupt:                                      # Ctrl+C in the terminal: an ordinary way to close it
+        log.info("Insert Coin closed (Ctrl+C in the terminal)")
+        raise SystemExit(130)
     except BaseException as e:
         if not isinstance(e, SystemExit): log.exception("Insert Coin stopped because of an error")
         raise

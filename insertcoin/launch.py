@@ -76,6 +76,9 @@ class Launcher:
         if engine and rc == 0 and took >= 3:
             try: self.lib.add_history(g)
             except Exception as e: log.warning("Could not update Recently Played: %s", e)
+        elif not engine and rc is not None and took >= 3:
+            try: self.lib.played_in_retroarch(g)
+            except Exception as e: log.warning("Could not update Recently Played: %s", e)
         if rc is not None and took >= 3:
             try: self.lib.note_launch(g, t0)                        # so browser games sort into Recently Played
             except Exception as e: log.warning("Could not note the launch: %s", e)

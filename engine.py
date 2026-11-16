@@ -14,6 +14,8 @@ also passed to the core, so e.g. Tab opens MAME's own menu in arcade games.
 
 Testing: --press NAME@FIRST-LAST holds a button during those frames (a RetroPad name such as
 "start" or "b", or a keyboard key such as "tab"); repeat it for more presses.
+--probe runs the game as fast as it can, with no sound, saves or controllers, looks at every 30th frame and
+ends with "Probe: N of M frames lit" (how Insert Coin checks that a newly found game starts).
 
 Supported so far: cores that draw in software (NES, SNES, Mega Drive, Game Boy, arcade, Neo Geo...).
 Cores that need the graphics card (N64, some PS1 modes) are a later step.
@@ -178,8 +180,9 @@ class AudioOut:
 
 # ---------------------------------------------------------------- the player
 class Player:
-    def __init__(self, core_path, rom, windowed=False, frames=None, shot=None, press=None, title=None):
+    def __init__(self, core_path, rom, windowed=False, frames=None, shot=None, press=None, title=None, probe=False):
         self.core_path, self.rom, self.frames_left, self.shot = core_path, rom, frames, shot
+        self.probe = probe; self.lit = self.looked = 0                # --probe: frames looked at, and those not black
         self.lib = C.CDLL(core_path)
         self.keep = []                                        # ctypes objects the core holds pointers to
         self.options, self.opt_buf = {}, {}
@@ -194,8 +197,8 @@ class Player:
         self.font = lambda n, _c={}: _c.setdefault(n, pygame.font.Font(fp, n))
         self.av = AVInfo()                                    # some cores report their size while loading
 
-        flags = 0 if shot else pygame.SCALED | (0 if windowed else pygame.FULLSCREEN)
-        self.screen = pygame.display.set_mode((W, H), flags, vsync=0 if shot else 1)
+        flags = 0 if shot or probe else pygame.SCALED | (0 if windowed else pygame.FULLSCREEN)
+        self.screen = pygame.display.set_mode((W, H), flags, vsync=0 if shot or probe else 1)
         pygame.display.set_caption("Insert Coin"); pygame.mouse.set_visible(False)
         self.pads = []; self.open_pads()
         if self.pads: self.style = self.pads[0][1]
@@ -221,9 +224,11 @@ class Player:
         g, t = self.av.geometry, self.av.timing
         log("INFO", f"Video {g.base_width}x{g.base_height} aspect {g.aspect_ratio:.3f}, {t.fps:.3f} fps, sound {t.sample_rate:.0f} Hz")
         for port in range(2): L.retro_set_controller_port_device(port, DEVICE_JOYPAD)
-        try: self.audio = AudioOut(t.sample_rate)
-        except Exception as e: log("WARN", f"No sound: {e}")
-        self.load_sram(); self.load_remap()
+        if not probe:
+            try: self.audio = AudioOut(t.sample_rate)
+            except Exception as e: log("WARN", f"No sound: {e}")
+            self.load_sram()
+        self.load_remap()
         self.keymap = {rk: pk for rk, pk in retro_keymap().items() if pk not in self.KEYS}   # pad keys stay pad keys
         self.clock = pygame.time.Clock()
 
@@ -368,6 +373,7 @@ class Player:
             b = open(p, "rb").read()[:size]; C.memmove(ptr, b, len(b)); log("INFO", "Battery save loaded")
 
     def save_sram(self):
+        if self.probe: return                                 # a test start keeps nothing
         size = self.lib.retro_get_memory_size(MEMORY_SAVE_RAM); ptr = self.lib.retro_get_memory_data(MEMORY_SAVE_RAM)
         if not size or not ptr: return
         os.makedirs(os.path.dirname(self.sram_path()), exist_ok=True)
@@ -438,6 +444,15 @@ class Player:
             for y in range(h): px.write(buf[y * pitch:(y + 1) * pitch], y * sp)
         self.frame = self.surf.subsurface((0, 0, w, h))
 
+    BRIGHT = bytes(range(48, 256))
+
+    def look(self):
+        """--probe: whether this frame shows anything (at least 1 in 2,000 colour values not near black)."""
+        self.looked += 1
+        if not self.frame: return
+        b = pygame.image.tobytes(self.frame, "RGB")
+        if len(b) - len(b.translate(None, self.BRIGHT)) >= max(1, len(b) // 2000): self.lit += 1
+
     def present(self):
         self.screen.fill((0, 0, 0))
         if self.frame:
@@ -463,6 +478,7 @@ class Player:
     # -- controllers: port 1 = keyboard + first pad, port 2 = second pad ...
     def open_pads(self):
         """Open each controller once and keep it (re-opening a pad SDL already has open can leave a stale copy)."""
+        if self.probe: return                                 # a test start reads no controllers
         have = {}
         for c, st in self.pads:
             try:
@@ -721,6 +737,10 @@ class Player:
                 else:
                     self.lib.retro_run(); ran = 1
                 frames += ran
+                if self.probe:                               # no picture, no waiting: just look now and then
+                    if frames % 30 == 0: self.look()
+                    if self.frames_left is not None and frames >= self.frames_left: break
+                    continue
                 if ran: self.present()
                 else: pygame.time.wait(1)
                 if not self.audio or self.shot: self.clock.tick(self.av.timing.fps or 60)
@@ -728,6 +748,7 @@ class Player:
                 if time.time() - last_save > 30: self.save_sram(); last_save = time.time()
         finally:
             if self.shot and self.frame: pygame.image.save(self.screen, self.shot); log("INFO", f"Screenshot: {self.shot}")
+            if self.probe: log("INFO", f"Probe: {self.lit} of {self.looked} frames lit")
             self.save_sram()
             # the save is safe now; if a core (or the sound device) hangs while closing, don't leave the player stuck
             snd = f", {self.audio.produced / 4 / self.audio.rate:.1f} s of sound" if self.audio else ", no sound"
@@ -769,7 +790,8 @@ def main():
             name, rng = a[k + 1].rsplit("@", 1); f0, f1 = (rng.split("-") + [rng])[:2]
             press.append((name.lower(), int(f0), int(f1)))
     title = a[a.index("--title") + 1] if "--title" in a else None
-    p = Player(a[0], a[1], windowed="--windowed" in a, frames=frames, shot=shot, press=press, title=title)
+    p = Player(a[0], a[1], windowed="--windowed" in a, frames=frames, shot=shot, press=press, title=title,
+               probe="--probe" in a)
     code = 0
     try: p.run()
     except BaseException as e:

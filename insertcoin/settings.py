@@ -3,7 +3,7 @@ import json, os
 from paths import CONFDIR
 
 
-DEFAULT_SETTINGS = {"sound": True, "engine": False, "one_per_game": True}
+DEFAULT_SETTINGS = {"sound": True, "engine": False, "one_per_game": True, "library": "retroarch"}
 
 def load_settings():
     try:

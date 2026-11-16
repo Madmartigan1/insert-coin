@@ -6,8 +6,11 @@ from insertcoin.web import WebGame
 
 
 # ---------------------------------------------------------------- metadata (year / publisher) from RetroArch's databases
-def _rdb_load(path):
-    b = open(path, "rb").read(); out = []
+def _rdb_load(path, binary=False):
+    """Every record of a RetroArch database (.rdb). Binary fields (crc, md5, sha1) come back as None, or as
+    lowercase hex with binary=True."""
+    with open(path, "rb") as f: b = f.read()
+    out = []
 
     def rd(i):
         t = b[i]; i += 1
@@ -17,7 +20,8 @@ def _rdb_load(path):
         if t == 0xc0: return None, i
         if t in (0xc2, 0xc3): return t == 0xc3, i
         if t in (0xc4, 0xc5, 0xc6):
-            w = {0xc4: 1, 0xc5: 2, 0xc6: 4}[t]; n = int.from_bytes(b[i:i + w], "big"); i += w; return None, i + n
+            w = {0xc4: 1, 0xc5: 2, 0xc6: 4}[t]; n = int.from_bytes(b[i:i + w], "big"); i += w
+            return (b[i:i + n].hex() if binary else None), i + n
         if t in (0xcc, 0xcd, 0xce, 0xcf):
             w = {0xcc: 1, 0xcd: 2, 0xce: 4, 0xcf: 8}[t]; return int.from_bytes(b[i:i + w], "big"), i + w
         if t in (0xd9, 0xda, 0xdb):

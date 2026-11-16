@@ -19,6 +19,9 @@ Controls (Xbox-style pad; keyboard in brackets)
 
 Options: --windowed   run in a window (for testing)
          --shot DIR   render sample screens to PNG files and exit (no display needed)
+         --scan       look through your game folders and report games not listed yet (changes nothing)
+         --scan --add test-start the games found and add those that start to Insert Coin's library
+         --scan --add --retry  the same, giving games left out for a black screen more starts
 """
 import os, sys
 
@@ -33,6 +36,7 @@ from insertcoin.cores import *  # noqa: F401,F403
 from insertcoin.controllers import *  # noqa: F401,F403
 from insertcoin.names import *  # noqa: F401,F403
 from insertcoin.retroarch import *  # noqa: F401,F403
+from insertcoin.ownlib import *  # noqa: F401,F403
 from insertcoin.games import *  # noqa: F401,F403
 from insertcoin.web import *  # noqa: F401,F403
 from insertcoin.flashinput import *  # noqa: F401,F403
