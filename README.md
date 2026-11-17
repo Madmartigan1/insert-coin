@@ -355,6 +355,13 @@ chmod +x ~/.local/share/insert-coin/insert-coin
 
 (Adjust `$HOME/insert-coin` if you cloned somewhere else.)
 
+Optionally, to type just `insert-coin` in a terminal, link it into a folder on your `PATH`
+(`~/.local/bin` is on it in most distributions, once it exists):
+
+```bash
+mkdir -p ~/.local/bin && ln -s ~/.local/share/insert-coin/insert-coin ~/.local/bin/insert-coin
+```
+
 ### 4. Add it to your applications menu
 
 ```bash
