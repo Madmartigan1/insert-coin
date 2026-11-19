@@ -14,20 +14,23 @@ class Core(NamedTuple):
     systems: tuple = ()         # playlists that start this core by default
     builtin: bool = False       # the built-in player runs it (draws in software; test-booted)
     arcade: bool = False        # arcade games: the built-in player's pause menu offers Controls
+    turbo: bool = False         # two-button systems: holding LB / RB fires the bottom / right button rapidly
+    turbo_face: bool = False    # ...and the left / top face buttons too (PC Engine: they're free in 2-button mode)
 
 
 # file name -> Core. N64 draws with the graphics card, so it stays with RetroArch for now.
 CORES = {
-    "mesen_libretro.so": Core("Mesen", ("Nintendo - Nintendo Entertainment System",), builtin=True),
+    "mesen_libretro.so": Core("Mesen", ("Nintendo - Nintendo Entertainment System",), builtin=True, turbo=True),
     "mesen-s_libretro.so": Core("Mesen-S", ("Nintendo - Super Nintendo Entertainment System",), builtin=True),
     "vbam_libretro.so": Core("VBA-M", ("Nintendo - Game Boy", "Nintendo - Game Boy Color",
-                                       "Nintendo - Game Boy Advance"), builtin=True),
+                                       "Nintendo - Game Boy Advance"), builtin=True, turbo=True),
     "mupen64plus_next_libretro.so": Core("Mupen64Plus-Next", ("Nintendo - Nintendo 64",)),
     "blastem_libretro.so": Core("BlastEm", ("Sega - Mega Drive - Genesis",), builtin=True),
     "picodrive_libretro.so": Core("PicoDrive", ("Sega - 32X",), builtin=True),
-    "mednafen_supergrafx_libretro.so": Core("Beetle SuperGrafx", ("NEC - PC Engine - TurboGrafx 16",), builtin=True),
+    "mednafen_supergrafx_libretro.so": Core("Beetle SuperGrafx", ("NEC - PC Engine - TurboGrafx 16",), builtin=True, turbo=True,
+                                            turbo_face=True),
     "mednafen_ngp_libretro.so": Core("Beetle NeoPop", ("SNK - Neo Geo Pocket", "SNK - Neo Geo Pocket Color"),
-                                     builtin=True),
+                                     builtin=True, turbo=True),
     "pcsx_rearmed_libretro.so": Core("PCSX-ReARMed", ("Sony - PlayStation",), builtin=True),
     "stella_libretro.so": Core("Stella", ("Atari - 2600",), builtin=True),
     "fbneo_libretro.so": Core("FinalBurn Neo", ("FBNeo - Arcade Games",), builtin=True, arcade=True),
@@ -58,6 +61,23 @@ def not_builtin_systems():
 def is_builtin(path):
     """Whether the built-in player runs this core."""
     return core_file(path) in ENGINE_CORES
+
+
+# games of a turbo core that use LB / RB themselves: Famicom Disk System (disk switching), Game Boy Advance (L / R)
+NO_TURBO = (".fds", ".gba")
+
+
+def has_turbo(path, files):
+    """Whether LB / RB are turbo buttons for this game: its core is a turbo core and none of the game's files
+    (the ROM, or the files inside its archive) is a kind that needs LB / RB."""
+    c = CORES.get(core_file(path))
+    return bool(c and c.turbo) and not any(f.lower().endswith(NO_TURBO) for f in files)
+
+
+def has_face_turbo(path):
+    """Whether the left / top face buttons are turbo buttons too (for a game has_turbo says yes to)."""
+    c = CORES.get(core_file(path))
+    return bool(c and c.turbo_face)
 
 
 def is_arcade(path, name=""):

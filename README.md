@@ -199,6 +199,14 @@ screen → **Player: Built-in (beta)**; switch back to **Player: RetroArch** at 
   takes over the old one, so nothing is lost. A dot marks what you changed; **Reset to standard
   layout** undoes it. It's saved for that game only, in `~/.config/insert-coin/remaps/`, and works
   for every player and the keyboard.
+- **Turbo buttons** *(PC Engine, NES / Famicom, Game Boy, Game Boy Color, Neo Geo Pocket)*: hold
+  **LB** to press the bottom button rapidly, about 15 times a second, and **RB** for the right
+  button, like the turbo switches on the PC Engine's own pad. These systems have two action buttons,
+  so the shoulder buttons are free. On the PC Engine the left and top face buttons (X / Y on an Xbox
+  pad, Square / Triangle on a PlayStation pad) are turbo buttons too: the left-hand ones fire II,
+  the right-hand ones I. Games that need LB / RB keep them: Famicom Disk System games
+  (switching disks), Game Boy Advance games (L and R), the Atari 2600 (difficulty switches), and the
+  PC Engine in 6-button mode (buttons III–VI). On the keyboard, Q / W do the same.
 - **Keyboard:** besides the pad keys below, the keyboard is passed on to the game, so emulators
   that use it work as they do in RetroArch — for example **Tab** opens MAME's own menu in arcade
   games, where *Input (this game)* sets buttons the way MAME32 did.
