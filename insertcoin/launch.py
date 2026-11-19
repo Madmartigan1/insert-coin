@@ -2,6 +2,7 @@
 import os, pygame, signal, subprocess, sys, time, urllib.parse
 from pygame._sdl2 import controller as sdlc
 from paths import APPDIR, HERE, LOGDIR
+from insertcoin.coreinstall import own_core
 from insertcoin.logs import log
 from insertcoin.cores import core_file, is_builtin
 from insertcoin.controllers import controller_style, sdl_controller_update
@@ -42,12 +43,13 @@ class Launcher:
         pygame.display.quit()
         kind = "engine" if engine else "retroarch"
         t0 = time.time(); ralog = f"{LOGDIR}/{kind}-last.log"; rc = None
-        log.info("Launch (%s): %s | %s | %s", who, g.label, core_file(g.core), g.path)
+        log.info("Launch (%s): %s | %s%s | %s", who, g.label, core_file(g.core),
+                 " (Insert Coin's copy)" if engine and own_core(g.core) != g.core else "", g.path)
         try:
             if os.path.exists(ralog): os.replace(ralog, f"{LOGDIR}/{kind}-previous.log")
             if engine:
                 with open(ralog, "w") as out:
-                    rc = subprocess.run([sys.executable, f"{HERE}/engine.py", g.core, g.path, "--title", g.title] + (["--windowed"] if self.windowed else []),
+                    rc = subprocess.run([sys.executable, f"{HERE}/engine.py", own_core(g.core), g.path, "--title", g.title] + (["--windowed"] if self.windowed else []),
                                         stdout=out, stderr=subprocess.STDOUT).returncode
                 if rc and time.time() - t0 < 10:                     # didn't start: let RetroArch try it instead
                     log.warning("Built-in player could not start it (exit %s), trying RetroArch", rc)

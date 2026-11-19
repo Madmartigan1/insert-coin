@@ -180,8 +180,9 @@ Switch / SNES-style means controllers with the Nintendo layout: Switch Pro, Joy-
 Insert Coin can play games itself, without starting RetroArch. Turn it on with **B** on the home
 screen → **Player: Built-in (beta)**; switch back to **Player: RetroArch** at any time.
 
-- **What it is:** a small libretro *frontend* inside Insert Coin. It loads the same core files
-  RetroArch uses (from `~/.config/retroarch/cores/`), shows the picture with sharp, correctly
+- **What it is:** a small libretro *frontend* inside Insert Coin. It loads Insert Coin's own copy
+  of each core once you've run `--cores` (see [Insert Coin's own cores](#insert-coins-own-cores)),
+  and otherwise the core files RetroArch uses (from `~/.config/retroarch/cores/`). It shows the picture with sharp, correctly
   proportioned pixels, plays the sound at the game's own speed, and reads your controllers.
 - **Systems:** everything whose core draws in software — NES / Famicom, SNES, Game Boy, Game Boy
   Color, Game Boy Advance, Mega Drive / Genesis, 32X, PC Engine, Neo Geo Pocket, PlayStation,
@@ -424,6 +425,7 @@ Start **Insert Coin** from your applications menu, or run:
 |---|---|
 | `--windowed` | Run in a window instead of fullscreen — games too (handy for testing next to a terminal) |
 | `--shot DIR` | Render sample screens to PNG files in `DIR` and exit — no display needed (for testing) |
+| `--cores` | Copy the built-in player's emulator cores into Insert Coin's own folder (downloading any RetroArch doesn't have); see below |
 | `--scan` | Look through your game folders and report the games that aren't in your library yet, system by system — **changes nothing** (beta; see below) |
 | `--scan --add` | The same, then test-start each game found and add the ones that start to Insert Coin's own library (beta; see below) |
 | `--scan --add --retry` | The same, and give the games left out for a black screen up to 6 more starts each |
@@ -458,6 +460,17 @@ for now, since the built-in player can't run them yet. Running it again only tes
 few games start only some of the time (the console's memory is random at power-on); `--scan --add --retry`
 starts the games left out for a black screen again, up to 6 times each, and adds those that show something.
 
+### Insert Coin's own cores
+
+`--cores` puts a copy of every core the built-in player runs in `~/.local/share/insert-coin/cores/`, and
+the built-in player uses those copies from then on. A core RetroArch already has is copied from RetroArch's
+folder, so you keep the versions you've been playing; one it doesn't have is downloaded from the libretro
+buildbot (`buildbot.libretro.com`), where RetroArch gets its cores too (64-bit PCs only for now). Each copy
+is test-loaded before it's used and must report the right name; one that fails is removed again and listed.
+RetroArch's own folder is never changed, and RetroArch keeps using its own cores (for Nintendo 64 too).
+Running it again keeps the copies you have; to replace one, delete it and run `--cores` again. Insert Coin
+doesn't ship cores itself: several don't allow commercial use, so they come from their publisher's server.
+
 **Tip:** close RetroArch before starting Insert Coin. Two copies of RetroArch running at once
 can overwrite each other's settings.
 
@@ -487,6 +500,7 @@ can overwrite each other's settings.
 | `~/.local/share/insert-coin/library.json` | Insert Coin's own game library (**Library: Insert Coin**), copied from your RetroArch playlists the first time you choose it |
 | `~/.local/share/insert-coin/scan-report.json` | What the last `--scan` found |
 | `~/.cache/insert-coin/scan.json` | What each scanned file holds, so later scans only read what changed |
+| `~/.local/share/insert-coin/cores/` | Insert Coin's own copies of the cores (`--cores`), and `cores.json`: where each came from, its version and checksum |
 | `~/.local/share/insert-coin/scan-not-added.json` | Games `--scan --add` found but didn't add, and why (nothing is deleted) |
 | `~/.cache/insert-coin/test-starts.json` | The result of each test start, so later runs only test what is new or changed |
 | `~/.local/share/insert-coin/favorites.json`, `history.json` | Favorites and Recently Played for **Library: Insert Coin**, copied from RetroArch's the first time |

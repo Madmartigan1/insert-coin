@@ -385,6 +385,11 @@ def main():
     shot = a[a.index("--shot") + 1] if "--shot" in a else None
     if shot: os.environ["SDL_VIDEODRIVER"] = "dummy"; os.environ["SDL_AUDIODRIVER"] = "dummy"
     if not shot: start_log()
+    if "--cores" in a:                   # copy (or download) the built-in player's cores into Insert Coin's folder
+        from insertcoin import coreinstall
+        print("Putting the built-in player's cores in Insert Coin's own folder (each one is test-loaded first)...")
+        print(coreinstall.summary(coreinstall.install(progress=lambda n, t, f: print(f"  {n} of {t}: {f}" + " " * 20, end="\r", flush=True))))
+        return
     if "--scan" in a:                    # report what a scan finds (changes nothing); with --add, test-start and add them
         from insertcoin.scanner import scan, summary
         print("Scanning your game folders (the first scan reads every archive's index; later ones only what changed)...")
