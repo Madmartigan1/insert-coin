@@ -37,6 +37,7 @@ CORES = {
     "mame2003_plus_libretro.so": Core("MAME 2003-Plus", ("MAME 2003-Plus",), builtin=True, arcade=True),
     "mame2003_libretro.so": Core("MAME 2003 (0.78)", builtin=True, arcade=True),
     "fbalpha2012_cps3_libretro.so": Core("FB Alpha 2012 CPS-3", builtin=True, arcade=True),
+    "snes9x_libretro.so": Core("Snes9x", builtin=True),     # Super Nintendo games with a DSP / ST01x chip (insertcoin/snes.py)
 }
 
 ENGINE_CORES = {f for f, c in CORES.items() if c.builtin}                  # the built-in player's cores

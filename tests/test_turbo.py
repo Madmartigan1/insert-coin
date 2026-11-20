@@ -44,7 +44,7 @@ class TurboButtons(unittest.TestCase):
         self.assertFalse(has_turbo(CORE("vbam"), ["Galaxy Run (USA).gba"]))             # L and R
         self.assertFalse(has_turbo(CORE("vbam"), ["Galaxy Run.zip", "Galaxy Run (USA).gba"]))   # inside an archive
         self.assertFalse(has_turbo(CORE("stella"), ["Turbo Tanks.a26"]))               # difficulty switches
-        self.assertFalse(has_turbo(CORE("snes9x"), ["Dark Run.sfc"]))                   # not in the table
+        self.assertFalse(has_turbo(CORE("snes9x"), ["Dark Run.sfc"]))                   # not a turbo core
 
     def test_pc_engine_mode_messages(self):
         p = engine.Player.__new__(engine.Player); p.six_button = set()

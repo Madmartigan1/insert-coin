@@ -7,8 +7,8 @@ player uses Insert Coin's folder as soon as it exists (paths.SYSTEM); RetroArch 
 
 The table lists each core's BIOS and firmware files with the checksums RetroArch's core information gives
 (libretro's core info files). Most are optional: the games run without them. A few are needed by some games:
-Famicom Disk System games, Neo Geo games whose set doesn't carry the BIOS, and the Super Nintendo games with
-an enhancement chip of the DSP or ST01x kind. CD systems aren't in Insert Coin yet, so their BIOS files aren't
+Famicom Disk System games and Neo Geo games whose set doesn't carry the BIOS. Super Nintendo games with a DSP or
+ST01x chip need the chip's files in Mesen-S; without them they play in Snes9x (insertcoin/snes.py). CD systems aren't in Insert Coin yet, so their BIOS files aren't
 listed."""
 import hashlib, os, shutil, zipfile
 from typing import NamedTuple
@@ -35,7 +35,8 @@ TABLE = [
     Bios("disksys.rom", "NES / Famicom", "mesen_libretro.so", "ca30b50f880eb660a320674ed365ef7a",
          needed="Famicom Disk System games (.fds)", title="the Famicom Disk System BIOS"),
     *[Bios(f, "Super Nintendo", "mesen-s_libretro.so",
-           needed="the few games with a DSP or ST01x chip") for f in _DSP],
+           use="Mesen-S runs the few games with a DSP or ST01x chip with them; without them those play in Snes9x")
+      for f in _DSP],
     Bios("BS-X.bin", "Super Nintendo", "mesen-s_libretro.so", needed="some Satellaview (BS) games"),
     Bios("gb_bios.bin", "Game Boy", "vbam_libretro.so", "32fbbd84168d3482956eb3c5051637f5",
          use="the start-up logo"),

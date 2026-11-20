@@ -494,8 +494,13 @@ gives). Most are optional, and the games run without them. A few games need one:
 
 - **Neo Geo** games whose zip doesn't carry the BIOS need `fbneo/neogeo.zip`;
 - **Famicom Disk System** games (`.fds`) need `disksys.rom`;
-- Super Nintendo games with a **DSP or ST01x chip** need the
-  chip's `.data.rom` and `.program.rom` files, and some Satellaview games need `BS-X.bin`.
+- some **Satellaview** games need `BS-X.bin`.
+
+Super Nintendo games with a **DSP or ST01x chip** (a few racing, flying and 3D games) need the chip's
+`.data.rom` and `.program.rom` files in Mesen-S, and stop at the start-up logo without them. Insert Coin reads
+the chip from the game's header and, when the files aren't in the BIOS folder, runs those games in Snes9x instead,
+which has the chips built in (`insert-coin --cores` installs it). With the files in the folder they stay with
+Mesen-S.
 
 Insert Coin doesn't download BIOS files (they're copyrighted): copy your own into the folder it shows. When a
 Disk System game can't start for lack of its BIOS, or FinalBurn Neo reports files missing for an arcade game,

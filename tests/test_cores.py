@@ -8,7 +8,7 @@ from insertcoin.systems import FRIENDLY
 
 class CoreTable(unittest.TestCase):
     def test_built_in_player_cores(self):
-        self.assertEqual(len(ENGINE_CORES), 13)
+        self.assertEqual(len(ENGINE_CORES), 14)
         self.assertIn("mesen_libretro.so", ENGINE_CORES)
         self.assertNotIn("mupen64plus_next_libretro.so", ENGINE_CORES)      # N64 needs the graphics card
         self.assertTrue(is_builtin("/x/cores/fbneo_libretro.so"))

@@ -1,9 +1,10 @@
 """Starting games: RetroArch, the built-in player, or a browser."""
 import os, pygame, signal, subprocess, sys, time, urllib.parse
 from pygame._sdl2 import controller as sdlc
-from paths import APPDIR, HERE, LOGDIR
+from paths import APPDIR, CORES_DIR, HERE, LOGDIR
 from insertcoin.bios import needs_missing, neogeo_bios_missing
 from insertcoin.coreinstall import own_core
+from insertcoin.snes import chip_core
 from insertcoin.logs import log
 from insertcoin.cores import core_file, is_builtin
 from insertcoin.controllers import controller_style, sdl_controller_update
@@ -57,13 +58,18 @@ class Launcher:
         pygame.display.quit()
         kind = "engine" if engine else "retroarch"
         t0 = time.time(); ralog = f"{LOGDIR}/{kind}-last.log"; rc = None
-        log.info("Launch (%s): %s | %s%s | %s", who, g.label, core_file(g.core),
-                 " (Insert Coin's copy)" if engine and own_core(g.core) != g.core else "", g.path)
+        run_core, chip_note = own_core(g.core), ""
+        if engine:                                                   # a chip game Mesen-S would get stuck on: Snes9x
+            instead, _, chip_note = chip_core(g.core, g.path)
+            if instead: run_core = own_core(instead)
+        log.info("Launch (%s): %s | %s%s%s | %s", who, g.label, core_file(run_core),
+                 " (Insert Coin's copy)" if engine and run_core.startswith(CORES_DIR + "/") else "",
+                 f" ({chip_note})" if chip_note else "", g.path)
         try:
             if os.path.exists(ralog): os.replace(ralog, f"{LOGDIR}/{kind}-previous.log")
             if engine:
                 with open(ralog, "w") as out:
-                    rc = subprocess.run([sys.executable, f"{HERE}/engine.py", own_core(g.core), g.path, "--title", g.title] + (["--windowed"] if self.windowed else []),
+                    rc = subprocess.run([sys.executable, f"{HERE}/engine.py", run_core, g.path, "--title", g.title] + (["--windowed"] if self.windowed else []),
                                         stdout=out, stderr=subprocess.STDOUT).returncode
                 if rc and time.time() - t0 < 10:                     # didn't start: let RetroArch try it instead
                     log.warning("Built-in player could not start it (exit %s), trying RetroArch", rc)
@@ -102,7 +108,7 @@ class Launcher:
         quit_by_user, files_missing = False, False
         if engine:
             try:
-                text = open(ralog, errors="replace").read()
+                with open(ralog, errors="replace") as f: text = f.read()
                 quit_by_user = "Quit chosen from the game menu" in text
                 files_missing = "[FBNeo]" in text and "is required" in text   # FinalBurn Neo: the set lacks files
             except OSError: pass
