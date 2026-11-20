@@ -391,11 +391,12 @@ Options:
   --scan                 look through your game folders and report games not listed yet (changes nothing)
   --scan --add           test-start the games found and add those that start to Insert Coin's library
   --scan --add --retry   the same, giving games left out for a black screen more starts
+  --cores                copy the built-in player's emulator cores into Insert Coin's own folder
   --shot DIR             render sample screens to PNG files and exit (no display needed)
   --help, -h             show this help
 
 More: https://github.com/Madmartigan1/insert-coin#usage"""
-OPTIONS = {"--windowed", "--scan", "--add", "--retry", "--shot", "--help", "-h"}
+OPTIONS = {"--windowed", "--scan", "--add", "--retry", "--cores", "--shot", "--help", "-h"}
 
 
 def check_options(a):
