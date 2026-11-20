@@ -19,6 +19,9 @@ Controls (Xbox-style pad; keyboard in brackets)
 
 Options: --windowed   run in a window (for testing)
          --shot DIR   render sample screens to PNG files and exit (no display needed)
+         --bios       check the BIOS files (and give Insert Coin its own BIOS folder, copied from RetroArch's)
+         --copy-art   copy RetroArch's box art into Insert Coin's own art folder, and check every picture
+         --cores      copy the built-in player's emulator cores into Insert Coin's own folder
          --scan       look through your game folders and report games not listed yet (changes nothing)
          --scan --add test-start the games found and add those that start to Insert Coin's library
          --scan --add --retry  the same, giving games left out for a black screen more starts

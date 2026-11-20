@@ -19,6 +19,7 @@ shows something."""
 import os, shutil, subprocess, sys, tempfile, time
 from concurrent.futures import ThreadPoolExecutor
 from paths import APPDIR, CACHE, HERE, LIBRARY, RA, SYSTEM
+from insertcoin.coreinstall import own_core
 from insertcoin.cores import DEFAULT_CORE, core_file, is_builtin
 from insertcoin.logs import log
 from insertcoin.names import split_archive
@@ -137,12 +138,12 @@ def add_found(report, starter=test_start, workers=None, progress=None, retry=Fal
         why, first, tried, black = "no core for this system", None, [], False
         starts = RETRY_STARTS if path in retried else 2       # some cores start with random memory: black isn't final
         for core in tries:
-            if not os.path.exists(core): why = f"core not installed: {core_file(core)}"; continue
-            ok, why = starter(core, path, env)
+            if not os.path.exists(own_core(core)): why = f"core not installed: {core_file(core)}"; continue
+            ok, why = starter(own_core(core), path, env)
             for _ in range(starts - 1):
                 if ok or not why.startswith("black"): break
                 black = True
-                ok, why = starter(core, path, env)
+                ok, why = starter(own_core(core), path, env)
             if ok: return path, {"file": stamp(path), "tries": tries, "rules": RULES, "passed": True, "core": core}
             black = black or why.startswith("black")
             tried.append(core_file(core).replace("_libretro.so", ""))

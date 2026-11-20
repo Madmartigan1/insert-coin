@@ -4,6 +4,36 @@ All notable changes to Insert Coin. Versions follow [semantic versioning](https:
 before 1.0, minor versions add features and patch versions fix bugs.
 Each version is also a [GitHub Release](https://github.com/Madmartigan1/insert-coin/releases).
 
+## [0.6.0] — 2026-11-20 · "Power On"
+
+### Added
+- **Insert Coin's own cores.** `insert-coin --cores` puts a copy of every core the built-in
+  player uses in Insert Coin's own folder: copied from RetroArch's when it has them, downloaded
+  from libretro's build server when it doesn't, and test-loaded before use. The built-in player
+  then runs on these copies; RetroArch keeps its own.
+- **BIOS check and Insert Coin's own BIOS folder.** `insert-coin --bios` copies RetroArch's BIOS
+  folder the first time (later runs only add what's missing, never replacing a file) and reports,
+  system by system, which BIOS files are there, which are the known good ones, and which games
+  need the missing ones. When a Famicom Disk System or Neo Geo game won't start for lack of a
+  BIOS, Insert Coin now says so.
+- **Super Nintendo games with an enhancement chip** (DSP or ST01x) play in Snes9x in the built-in
+  player when the chip's files aren't in the BIOS folder; before, they stopped at the start-up
+  logo. `insert-coin --cores` installs Snes9x.
+- **Insert Coin's own box-art folder.** The menus read pictures from Insert Coin's folder first,
+  and `sync_thumbnails.py` downloads new art into it. `insert-coin --copy-art` copies RetroArch's
+  art into it and checks the copy two ways (every file byte for byte, and every game's box art,
+  title screen and snapshot), ending with "All checks passed."
+- **Turbo buttons** in the built-in player: on two-button systems (PC Engine, NES / Famicom,
+  Game Boy, Game Boy Color, Neo Geo Pocket), holding LB / RB presses the bottom / right button
+  about 15 times a second. On the PC Engine the left / top face buttons are turbo buttons too.
+  Games that need LB / RB themselves keep them (Famicom Disk System, Game Boy Advance, the
+  Atari 2600, the PC Engine in 6-button mode).
+
+### Changed
+- `insert-coin --help` lists the new options.
+- README: how to add new games, an optional link so `insert-coin` works as a terminal command,
+  and sections for the cores, BIOS and art commands.
+
 ## [0.5.1] — 2026-11-20
 
 ### Added

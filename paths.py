@@ -19,6 +19,9 @@ SAVES = os.environ.get("INSERT_COIN_SAVES") or f"{APPDIR}/saves"
 LIBRARY = f"{APPDIR}/library.json"                                    # Insert Coin's own game library (B menu: Library)
 FAVORITES = f"{APPDIR}/favorites.json"                                # ...its Favorites
 HISTORY = f"{APPDIR}/history.json"                                    # ...and Recently Played
+CORES_DIR = f"{APPDIR}/cores"                                         # Insert Coin's own copies of the cores (--cores)
+THUMBNAILS = f"{APPDIR}/thumbnails"                                   # Insert Coin's own box art (read before RetroArch's)
+RA_THUMBNAILS = f"{RA}/thumbnails"                                    # RetroArch's box art
 # BIOS files: Insert Coin's own folder once it has one, else the one RetroArch uses (Neo Geo BIOS lives there)
 SYSTEM = os.environ.get("INSERT_COIN_SYSTEM") or (f"{APPDIR}/system" if os.path.isdir(f"{APPDIR}/system") else f"{RA}/system")
 HERE = os.path.dirname(os.path.abspath(__file__))                    # the folder with insert_coin.py and engine.py

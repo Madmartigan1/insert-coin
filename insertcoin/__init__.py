@@ -9,6 +9,8 @@
   ownlib       Insert Coin's own library (library.json), imported from RetroArch
   scanner      finds games in the folders and recognises them (--scan; reports only)
   adding       test-starts the games found and adds those that start to the library (--scan --add)
+  coreinstall  Insert Coin's own copies of the cores (--cores);  bios: BIOS files and folder (--bios)
+  artwork      Insert Coin's own box-art folder, and the checked copy of RetroArch's (--copy-art)
   games        a game;  names: labels, sorting, versions;  meta: year and publisher
   web          browser and Flash games;  flashinput: optional DevTools input for Flash
   systems      known systems;  cores: every core, its systems, built-in player, arcade
@@ -17,6 +19,6 @@
 """
 import os
 
-__version__ = "0.5.1"
+__version__ = "0.6.0"
 
 os.environ.setdefault("PYGAME_HIDE_SUPPORT_PROMPT", "1")            # before any module imports pygame

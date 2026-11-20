@@ -1,7 +1,10 @@
 """Starting games: RetroArch, the built-in player, or a browser."""
 import os, pygame, signal, subprocess, sys, time, urllib.parse
 from pygame._sdl2 import controller as sdlc
-from paths import APPDIR, HERE, LOGDIR
+from paths import APPDIR, CORES_DIR, HERE, LOGDIR
+from insertcoin.bios import needs_missing, neogeo_bios_missing
+from insertcoin.coreinstall import own_core
+from insertcoin.snes import chip_core
 from insertcoin.logs import log
 from insertcoin.cores import core_file, is_builtin
 from insertcoin.controllers import controller_style, sdl_controller_update
@@ -24,6 +27,19 @@ config_save_on_exit = "false"
 """
 
 
+def after_game(took, quit_by_user, files_missing, g):
+    """What to tell the player when a game ended badly, or None: a BIOS it needs is missing, it closed straight
+    away, or FinalBurn Neo reported files missing (a Neo Geo game may lack the BIOS too)."""
+    if took < 3 and not quit_by_user:
+        bios = needs_missing(g.core, g.path)
+        if bios: return f"This game needs {bios.title} ({bios.file}) - see insert-coin --bios"
+        return "The game closed straight away - it may need a different core"
+    if files_missing:
+        return ("Files are missing for this game; so is the Neo Geo BIOS (see insert-coin --bios)"
+                if neogeo_bios_missing() else "FinalBurn Neo says some of this game's files are missing")
+    return None
+
+
 class Launcher:
 
     def launch(self, g):
@@ -42,12 +58,18 @@ class Launcher:
         pygame.display.quit()
         kind = "engine" if engine else "retroarch"
         t0 = time.time(); ralog = f"{LOGDIR}/{kind}-last.log"; rc = None
-        log.info("Launch (%s): %s | %s | %s", who, g.label, core_file(g.core), g.path)
+        run_core, chip_note = own_core(g.core), ""
+        if engine:                                                   # a chip game Mesen-S would get stuck on: Snes9x
+            instead, _, chip_note = chip_core(g.core, g.path)
+            if instead: run_core = own_core(instead)
+        log.info("Launch (%s): %s | %s%s%s | %s", who, g.label, core_file(run_core),
+                 " (Insert Coin's copy)" if engine and run_core.startswith(CORES_DIR + "/") else "",
+                 f" ({chip_note})" if chip_note else "", g.path)
         try:
             if os.path.exists(ralog): os.replace(ralog, f"{LOGDIR}/{kind}-previous.log")
             if engine:
                 with open(ralog, "w") as out:
-                    rc = subprocess.run([sys.executable, f"{HERE}/engine.py", g.core, g.path, "--title", g.title] + (["--windowed"] if self.windowed else []),
+                    rc = subprocess.run([sys.executable, f"{HERE}/engine.py", run_core, g.path, "--title", g.title] + (["--windowed"] if self.windowed else []),
                                         stdout=out, stderr=subprocess.STDOUT).returncode
                 if rc and time.time() - t0 < 10:                     # didn't start: let RetroArch try it instead
                     log.warning("Built-in player could not start it (exit %s), trying RetroArch", rc)
@@ -83,11 +105,15 @@ class Launcher:
             try: self.lib.note_launch(g, t0)                        # so browser games sort into Recently Played
             except Exception as e: log.warning("Could not note the launch: %s", e)
         self.back_from_game()
-        quit_by_user = False
+        quit_by_user, files_missing = False, False
         if engine:
-            try: quit_by_user = "Quit chosen from the game menu" in open(ralog, errors="replace").read()
+            try:
+                with open(ralog, errors="replace") as f: text = f.read()
+                quit_by_user = "Quit chosen from the game menu" in text
+                files_missing = "[FBNeo]" in text and "is required" in text   # FinalBurn Neo: the set lacks files
             except OSError: pass
-        if took < 3 and not quit_by_user: self.err("The game closed straight away - it may need a different core")
+        msg = after_game(took, quit_by_user, files_missing, g)
+        if msg: self.err(msg)
 
     def back_from_game(self):
         """The game has ended: screen, controllers (they may have changed), sound, and the lists back."""

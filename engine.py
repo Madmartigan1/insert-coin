@@ -30,7 +30,7 @@ from pygame._sdl2 import audio as sdla
 if os.path.dirname(os.path.abspath(__file__)) not in sys.path:     # also when loaded with runpy (docs/make_screenshots.py)
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from paths import RA, APPDIR, SAVES, SYSTEM, CONFDIR
-from insertcoin.cores import is_arcade
+from insertcoin.cores import has_face_turbo, has_turbo, is_arcade
 W, H = 1920, 1080
 
 def split_archive(path):
@@ -129,6 +129,23 @@ PAD_LABELS["snes"] = {**PAD_LABELS["nintendo"], SELECT: "Select", START: "Start"
 PAD_LABELS["generic"] = PAD_LABELS["xbox"]
 
 
+TURBO_ON, TURBO_OFF = 2, 2                               # frames: 15 presses a second at 60 frames a second
+
+
+def turbo_bits(bits, frame, six_button=False, face=False):
+    """Turbo buttons: while LB is held the bottom button (RetroPad B) is pressed and released over and over, and RB
+    does the same for the right button (RetroPad A); with face, the left face button (RetroPad Y) is a turbo bottom
+    button too and the top one (RetroPad X) a turbo right button. The turbo buttons themselves aren't passed on.
+    In the PC Engine's 6-button mode they are buttons III-VI, so they're left alone."""
+    left, right = 1 << L_ | (1 << Y_ if face else 0), 1 << R_ | (1 << X_ if face else 0)
+    if six_button or not bits & (left | right): return bits
+    on = frame % (TURBO_ON + TURBO_OFF) < TURBO_ON
+    out = bits & ~(left | right)
+    if on and bits & left: out |= 1 << B_
+    if on and bits & right: out |= 1 << A_
+    return out
+
+
 def retro_keymap():
     """libretro key codes (SDL 1.2 numbering) -> pygame keys, for passing the keyboard to the core."""
     k = {c: c for c in list(range(32, 127)) + [8, 9, 13, 127]}   # printable keys, Backspace, Tab, Return, Delete
@@ -191,7 +208,7 @@ class Player:
         self.paused = False; self.menu_sel = 0; self.combo_down = False
         self.mode = "pause"                                   # pause menu: "pause", "controls" or "wait" (for a button)
         self.descs = {}; self.remap = {}; self.ctl_sel = 0; self.wait_until = 0; self.style = "keyboard"
-        self.fno = 0; self.press = press or []; self.bits = [0]; self.sticks = []
+        self.fno = 0; self.turbo = self.turbo_face = False; self.six_button = set(); self.press = press or []; self.bits = [0]; self.sticks = []
         self.keymap = None; self.title = title; self.keys = (); self.held_keys = set()
         fp = pygame.font.match_font("ubuntu,notosans,dejavusans", bold=True)
         self.font = lambda n, _c={}: _c.setdefault(n, pygame.font.Font(fp, n))
@@ -351,6 +368,11 @@ class Player:
         elif not self.info.need_fullpath:
             data = open(path, "rb").read()
         self.game_name = os.path.splitext(os.path.basename(inner or path))[0]
+        files = [inner or path] + (archive_names(path) if not inner and kind in ("zip", "7z") else [])
+        self.turbo = has_turbo(self.core_path, files)
+        self.turbo_face = self.turbo and has_face_turbo(self.core_path)
+        if self.turbo: log("INFO", "Turbo: hold LB / RB" + (" or the left / top buttons" if self.turbo_face else "")
+                           + " to fire the bottom / right button rapidly")
         gi = GameInfo(path.encode(), None, 0, None)
         if data is not None and not self.info.need_fullpath:
             self.romdata = C.create_string_buffer(data, len(data))
@@ -545,6 +567,8 @@ class Player:
                 if name in RETROPAD_NAMES: bits[0] |= 1 << RETROPAD_NAMES[name]
                 else: self.held_keys.add(pygame.key.key_code(name))
         self.keys = keys
+        if self.turbo:
+            bits = [turbo_bits(b, self.fno, port in self.six_button, self.turbo_face) for port, b in enumerate(bits)]
         self.bits = [self.apply_remap(b) for b in bits]
         self.sticks = [[(c.get_axis(pygame.CONTROLLER_AXIS_LEFTX), c.get_axis(pygame.CONTROLLER_AXIS_LEFTY)),
                         (c.get_axis(pygame.CONTROLLER_AXIS_RIGHTX), c.get_axis(pygame.CONTROLLER_AXIS_RIGHTY))]
@@ -574,6 +598,8 @@ class Player:
     def core_message(self, text, seconds):
         """Shown on screen the way RetroArch does (e.g. the PC Engine core's '6-button mode selected')."""
         log("INFO", "Core message: " + text)
+        m = re.match(r"(\d)-button mode selected for pad (\d+)", text)      # PC Engine: LT switches 2 / 6 buttons
+        if m: (self.six_button.add if m[1] == "6" else self.six_button.discard)(int(m[2]) - 1)
         self.osd = (text, time.time() + max(2.0, min(6.0, seconds or 3.0)))
 
     def draw_osd(self):

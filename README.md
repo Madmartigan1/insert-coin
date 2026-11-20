@@ -5,13 +5,14 @@
 Pick a system, scroll through the box art, press **A** to play. No keyboard, no settings menus —
 just your games, the way a console shows them.
 
-> **Status: 0.5.1 — early release.** Tested on Linux Mint 22.3 (Cinnamon, X11) with Xbox-style and
+> **Status: 0.6.0 — early release.** Tested on Linux Mint 22.3 (Cinnamon, X11) with Xbox-style and
 > PlayStation controllers. It hasn't been tried on other
 > setups yet, so expect rough edges and please [report them](CONTRIBUTING.md).
 >
-> Insert Coin currently needs a working RetroArch setup: it uses RetroArch's playlists, cores and
-> artwork. Since 0.4.0 it can also play most games itself (**Built-in player**, beta) — the first
-> step towards a standalone version that sets everything up for you.
+> Insert Coin currently needs a working RetroArch setup: it starts from RetroArch's playlists and
+> runs N64 games in it. Since 0.4.0 it can also play most games itself (**Built-in player**, beta),
+> and since 0.6 it can keep its own copies of the cores, BIOS files and box art — steps towards a
+> standalone version that sets everything up for you.
 
 ![Insert Coin's game screen: a box-art carousel over a blurred in-game snapshot, with the title screen in a side panel](docs/screenshots/games.png)
 
@@ -180,8 +181,9 @@ Switch / SNES-style means controllers with the Nintendo layout: Switch Pro, Joy-
 Insert Coin can play games itself, without starting RetroArch. Turn it on with **B** on the home
 screen → **Player: Built-in (beta)**; switch back to **Player: RetroArch** at any time.
 
-- **What it is:** a small libretro *frontend* inside Insert Coin. It loads the same core files
-  RetroArch uses (from `~/.config/retroarch/cores/`), shows the picture with sharp, correctly
+- **What it is:** a small libretro *frontend* inside Insert Coin. It loads Insert Coin's own copy
+  of each core once you've run `--cores` (see [Insert Coin's own cores](#insert-coins-own-cores)),
+  and otherwise the core files RetroArch uses (from `~/.config/retroarch/cores/`). It shows the picture with sharp, correctly
   proportioned pixels, plays the sound at the game's own speed, and reads your controllers.
 - **Systems:** everything whose core draws in software — NES / Famicom, SNES, Game Boy, Game Boy
   Color, Game Boy Advance, Mega Drive / Genesis, 32X, PC Engine, Neo Geo Pocket, PlayStation,
@@ -199,6 +201,14 @@ screen → **Player: Built-in (beta)**; switch back to **Player: RetroArch** at 
   takes over the old one, so nothing is lost. A dot marks what you changed; **Reset to standard
   layout** undoes it. It's saved for that game only, in `~/.config/insert-coin/remaps/`, and works
   for every player and the keyboard.
+- **Turbo buttons** *(PC Engine, NES / Famicom, Game Boy, Game Boy Color, Neo Geo Pocket)*: hold
+  **LB** to press the bottom button rapidly, about 15 times a second, and **RB** for the right
+  button, like the turbo switches on the PC Engine's own pad. These systems have two action buttons,
+  so the shoulder buttons are free. On the PC Engine the left and top face buttons (X / Y on an Xbox
+  pad, Square / Triangle on a PlayStation pad) are turbo buttons too: the left-hand ones fire II,
+  the right-hand ones I. Games that need LB / RB keep them: Famicom Disk System games
+  (switching disks), Game Boy Advance games (L and R), the Atari 2600 (difficulty switches), and the
+  PC Engine in 6-button mode (buttons III–VI). On the keyboard, Q / W do the same.
 - **Keyboard:** besides the pad keys below, the keyboard is passed on to the game, so emulators
   that use it work as they do in RetroArch — for example **Tab** opens MAME's own menu in arcade
   games, where *Input (this game)* sets buttons the way MAME32 did.
@@ -206,7 +216,8 @@ screen → **Player: Built-in (beta)**; switch back to **Player: RetroArch** at 
   Engine core's *6-button mode selected* when **LT** (L2) switches its pad mode. Some older PC
   Engine games can't walk in 6-button mode; press LT again to switch back.
 - **Settings:** each core uses the options you chose for it in RetroArch, if any; otherwise its
-  defaults. BIOS files are read from RetroArch's `system` folder.
+  defaults. BIOS files are read from Insert Coin's own BIOS folder once you've run `--bios` (see
+  [BIOS files](#bios-files)), otherwise from RetroArch's `system` folder.
 - **`.7z` archives** are opened with the 7-Zip program (`sudo apt install p7zip-full`); `.zip`
   needs nothing extra.
 - **Not there yet:** save states, rewind, fast-forward, shaders, changing core options, swapping
@@ -299,13 +310,14 @@ appears on the home screen after the consoles:
 | **RetroArch cores** | The cores for your systems, installed via RetroArch → *Online Updater → Core Downloader*. |
 | **RetroArch playlists** | Your games scanned into playlists (RetroArch → *Import Content*). Insert Coin shows one system per playlist. |
 | **A core per game** | Each playlist needs a default core (*Settings → Playlists → Manage Playlists → Default Core*), or each game its own core association. Games without a core can't be launched. |
-| **Thumbnails** *(optional)* | Box art, snapshots and title screens in RetroArch's thumbnails folder. See [Getting artwork](#getting-artwork-sync_thumbnailspy). |
+| **Thumbnails** *(optional)* | Box art, snapshots and title screens, in Insert Coin's or RetroArch's thumbnails folder. See [Getting artwork](#getting-artwork-sync_thumbnailspy). |
 | **Python 3.10+** | With the `venv` module (`python3-venv` on Debian/Ubuntu/Mint). |
 | **pygame-ce** | Installed automatically in the steps below. |
 | **Your own games** | Insert Coin includes **no** games, BIOS files or artwork. |
 
-**BIOS files:** some systems (e.g. PlayStation, Neo Geo) need BIOS files in RetroArch's `system`
-folder. Insert Coin does not provide or check these; if a game works in RetroArch, it works here.
+**BIOS files:** a few games need BIOS files (Neo Geo, Famicom Disk System, some Super Nintendo
+games). Insert Coin doesn't provide them; `insert-coin --bios` checks which ones you have (see
+[BIOS files](#bios-files)).
 
 ## Installation
 
@@ -355,6 +367,13 @@ chmod +x ~/.local/share/insert-coin/insert-coin
 
 (Adjust `$HOME/insert-coin` if you cloned somewhere else.)
 
+Optionally, to type just `insert-coin` in a terminal, link it into a folder on your `PATH`
+(`~/.local/bin` is on it in most distributions, once it exists):
+
+```bash
+mkdir -p ~/.local/bin && ln -s ~/.local/share/insert-coin/insert-coin ~/.local/bin/insert-coin
+```
+
 ### 4. Add it to your applications menu
 
 ```bash
@@ -379,7 +398,9 @@ cp ~/.local/share/applications/insert-coin.desktop ~/.config/autostart/
 
 ## Getting artwork: `sync_thumbnails.py`
 
-Insert Coin uses RetroArch's thumbnails. `sync_thumbnails.py` fills in whatever is missing for
+Insert Coin keeps box art in its own folder, `~/.local/share/insert-coin/thumbnails/`, and also reads
+RetroArch's thumbnails folder: a game's picture is taken from Insert Coin's folder first, then from
+RetroArch's. `sync_thumbnails.py` fills in whatever is missing for
 **all** your playlists in one go, and for the games in Insert Coin's own library (such as those
 added by `--scan --add`), from `thumbnails.libretro.com` — the same source RetroArch's built-in
 updater uses.
@@ -388,6 +409,7 @@ updater uses.
   `(USA)` or `[!]` and prefers the same region as your copy.
 - Downloads box art, snapshots and title screens.
 - **Never overwrites** existing images — safe to re-run whenever you add games.
+- Saves new pictures in Insert Coin's own folder; a picture either folder has counts as there.
 - Needs only Python's standard library.
 
 ```bash
@@ -396,6 +418,15 @@ python3 ~/insert-coin/sync_thumbnails.py         # download
 ```
 
 A large collection can mean several gigabytes of images on the first run.
+
+### Copying RetroArch's art: `--copy-art`
+
+`insert-coin --copy-art` copies the pictures in RetroArch's thumbnails folder into Insert Coin's own,
+so Insert Coin no longer needs RetroArch's. It never replaces a picture Insert Coin's folder already has
+and never changes RetroArch's folder, and it checks there's enough free space first. Then it checks the
+copy two ways: every picture is compared byte for byte with RetroArch's, and every game in your
+library is looked up in both folders, so each game's box art, title screen and snapshot are shown to be
+there. It ends with *All checks passed*, or names what differs.
 
 ## Usage
 
@@ -409,10 +440,32 @@ Start **Insert Coin** from your applications menu, or run:
 |---|---|
 | `--windowed` | Run in a window instead of fullscreen — games too (handy for testing next to a terminal) |
 | `--shot DIR` | Render sample screens to PNG files in `DIR` and exit — no display needed (for testing) |
+| `--bios` | Check the BIOS files the built-in player's cores can use, and give Insert Coin its own BIOS folder (a copy of RetroArch's); see below |
+| `--copy-art` | Copy RetroArch's box art into Insert Coin's own art folder and check every picture and every game; see [Copying RetroArch's art](#copying-retroarchs-art---copy-art) |
+| `--cores` | Copy the built-in player's emulator cores into Insert Coin's own folder (downloading any RetroArch doesn't have); see below |
 | `--scan` | Look through your game folders and report the games that aren't in your library yet, system by system — **changes nothing** (beta; see below) |
 | `--scan --add` | The same, then test-start each game found and add the ones that start to Insert Coin's own library (beta; see below) |
 | `--scan --add --retry` | The same, and give the games left out for a black screen up to 6 more starts each |
 | `--help`, `-h` | List these options. An option Insert Coin doesn't know is refused with a message; it never opens the app |
+
+### Adding new games
+
+**With *Library: Insert Coin*** (B menu):
+
+1. Copy the game into the folder that holds your games, beside that system's other games. Don't rename
+   arcade zips: they're recognised by their set name.
+2. Run `insert-coin --scan --add`. It finds the new files, test-starts each one and adds the ones that start
+   (see below). Files it has seen before aren't read again, so this is quick.
+3. *(Optional)* Run `sync_thumbnails.py` to get box art for them (see
+   [Getting artwork](#getting-artwork-sync_thumbnailspy)).
+4. Restart Insert Coin: it reads the library when it starts.
+
+**With *Library: RetroArch*:** scan the folder in RetroArch (*Import Content → Scan Directory*), then do
+steps 3 and 4.
+
+Nintendo 64 games can't be added by `--scan --add` yet, since the built-in player can't test-start them. Add
+them with RetroArch's scanner; for now they show with *Library: RetroArch* only, because Insert Coin's own
+library copies RetroArch's playlists just once, the first time it is used.
 
 ### Scanning for games (beta)
 
@@ -444,6 +497,41 @@ for now, since the built-in player can't run them yet. Running it again only tes
 few games start only some of the time (the console's memory is random at power-on); `--scan --add --retry`
 starts the games left out for a black screen again, up to 6 times each, and adds those that show something.
 
+### BIOS files
+
+`--bios` copies RetroArch's BIOS folder (`~/.config/retroarch/system/`) to Insert Coin's own,
+`~/.local/share/insert-coin/system/`, the first time; the built-in player uses that folder from then on.
+Later runs only add files RetroArch has that Insert Coin's folder lacks, and never replace one; RetroArch's
+folder is never changed. It then lists, system by system, the BIOS files the built-in player's cores can
+use, and whether each is there and the known good dump (by the checksums RetroArch's core information
+gives). Most are optional, and the games run without them. A few games need one:
+
+- **Neo Geo** games whose zip doesn't carry the BIOS need `fbneo/neogeo.zip`;
+- **Famicom Disk System** games (`.fds`) need `disksys.rom`;
+- some **Satellaview** games need `BS-X.bin`.
+
+Super Nintendo games with a **DSP or ST01x chip** (a few racing, flying and 3D games) need the chip's
+`.data.rom` and `.program.rom` files in Mesen-S, and stop at the start-up logo without them. Insert Coin reads
+the chip from the game's header and, when the files aren't in the BIOS folder, runs those games in Snes9x instead,
+which has the chips built in (`insert-coin --cores` installs it). With the files in the folder they stay with
+Mesen-S.
+
+Insert Coin doesn't download BIOS files (they're copyrighted): copy your own into the folder it shows. When a
+Disk System game can't start for lack of its BIOS, or FinalBurn Neo reports files missing for an arcade game,
+Insert Coin says so when you're back in the menu. CD systems aren't in Insert Coin yet, so their BIOS files
+aren't listed.
+
+### Insert Coin's own cores
+
+`--cores` puts a copy of every core the built-in player runs in `~/.local/share/insert-coin/cores/`, and
+the built-in player uses those copies from then on. A core RetroArch already has is copied from RetroArch's
+folder, so you keep the versions you've been playing; one it doesn't have is downloaded from the libretro
+buildbot (`buildbot.libretro.com`), where RetroArch gets its cores too (64-bit PCs only for now). Each copy
+is test-loaded before it's used and must report the right name; one that fails is removed again and listed.
+RetroArch's own folder is never changed, and RetroArch keeps using its own cores (for Nintendo 64 too).
+Running it again keeps the copies you have; to replace one, delete it and run `--cores` again. Insert Coin
+doesn't ship cores itself: several don't allow commercial use, so they come from their publisher's server.
+
 **Tip:** close RetroArch before starting Insert Coin. Two copies of RetroArch running at once
 can overwrite each other's settings.
 
@@ -454,7 +542,7 @@ can overwrite each other's settings.
 | Path | What |
 |---|---|
 | `~/.config/retroarch/playlists/*.lpl` | Your systems and games, and each game's core |
-| `~/.config/retroarch/thumbnails/` | Box art, snapshots, title screens |
+| `~/.config/retroarch/thumbnails/` | Box art, snapshots, title screens (after Insert Coin's own folder) |
 | `~/.config/retroarch/content_history.lpl` | Recently Played |
 | `~/.config/retroarch/database/rdb/*.rdb` | Year and publisher information, and (`--scan`) the checksums and arcade set names games are recognised by |
 | `~/.config/insert-coin/browser_games.json` | Your browser and Flash game playlists (optional) |
@@ -465,6 +553,7 @@ can overwrite each other's settings.
 |---|---|
 | `~/.config/retroarch/content_favorites.lpl` | When you add/remove a favorite (only while RetroArch is closed) |
 | `~/.local/share/insert-coin/launch.cfg` | Each game launch: the in-game controller shortcuts, passed to RetroArch with `--appendconfig` |
+| `~/.local/share/insert-coin/thumbnails/` | Box art, snapshots and title screens: new ones from `sync_thumbnails.py`, and RetroArch's after `--copy-art` |
 | `~/.local/share/insert-coin/saves/` | Battery saves of games played in the built-in player |
 | `~/.cache/insert-coin/meta/` | Cached year/publisher lookups |
 | `~/.config/insert-coin/controllers.json` | Button set-ups for controllers that aren't recognised automatically |
@@ -473,6 +562,8 @@ can overwrite each other's settings.
 | `~/.local/share/insert-coin/library.json` | Insert Coin's own game library (**Library: Insert Coin**), copied from your RetroArch playlists the first time you choose it |
 | `~/.local/share/insert-coin/scan-report.json` | What the last `--scan` found |
 | `~/.cache/insert-coin/scan.json` | What each scanned file holds, so later scans only read what changed |
+| `~/.local/share/insert-coin/system/` | Insert Coin's own BIOS folder (`--bios`), a copy of RetroArch's |
+| `~/.local/share/insert-coin/cores/` | Insert Coin's own copies of the cores (`--cores`), and `cores.json`: where each came from, its version and checksum |
 | `~/.local/share/insert-coin/scan-not-added.json` | Games `--scan --add` found but didn't add, and why (nothing is deleted) |
 | `~/.cache/insert-coin/test-starts.json` | The result of each test start, so later runs only test what is new or changed |
 | `~/.local/share/insert-coin/favorites.json`, `history.json` | Favorites and Recently Played for **Library: Insert Coin**, copied from RetroArch's the first time |
@@ -496,7 +587,7 @@ also runs in a window, and that is not saved.
 |---|---|
 | **A system is missing** | Insert Coin hides empty playlists. Check the playlist exists in `~/.config/retroarch/playlists/` and has games. |
 | **"No core is set for this game"** | Set a default core for that playlist in RetroArch (*Settings → Playlists → Manage Playlists*) or set the game's core association. |
-| **"The game closed straight away"** | The game doesn't run with its assigned core, or a BIOS file is missing. Try it in RetroArch directly to see the error, then change the core. |
+| **"The game closed straight away"** | The game doesn't run with its assigned core, or a BIOS file is missing (`insert-coin --bios` lists them). Try it in RetroArch directly to see the error, then change the core. |
 | **I see fewer games than RetroArch lists** | Copies of the same game in several folders are shown once, and versions are grouped (press **X** on a game to see them). **B** on the home screen → **Games: Show all** lists every ROM. |
 | **A game behaves differently in the built-in player** | Switch to **Player: RetroArch** and compare. If it's the same there, it's the game (some fire automatically, for instance); if not, please [report it](CONTRIBUTING.md) with `engine-last.log`. |
 | **No artwork** | Run `sync_thumbnails.py`. Some games — hacks, prototypes, translations — have no artwork on the server and get a name card instead. |

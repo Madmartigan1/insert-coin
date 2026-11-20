@@ -1,5 +1,5 @@
 """The app: state, navigation, input and the main loop."""
-import os, platform, pygame, subprocess, sys, time
+import os, platform, pygame, shutil, subprocess, sys, time
 from pygame._sdl2 import controller as sdlc
 from insertcoin import __version__
 from insertcoin.logs import log, start_log
@@ -391,11 +391,14 @@ Options:
   --scan                 look through your game folders and report games not listed yet (changes nothing)
   --scan --add           test-start the games found and add those that start to Insert Coin's library
   --scan --add --retry   the same, giving games left out for a black screen more starts
+  --cores                copy the built-in player's emulator cores into Insert Coin's own folder
+  --bios                 check the BIOS files (and give Insert Coin its own BIOS folder, copied from RetroArch's)
+  --copy-art             copy RetroArch's box art into Insert Coin's own art folder, and check every picture
   --shot DIR             render sample screens to PNG files and exit (no display needed)
   --help, -h             show this help
 
 More: https://github.com/Madmartigan1/insert-coin#usage"""
-OPTIONS = {"--windowed", "--scan", "--add", "--retry", "--shot", "--help", "-h"}
+OPTIONS = {"--windowed", "--scan", "--add", "--retry", "--cores", "--bios", "--copy-art", "--shot", "--help", "-h"}
 
 
 def check_options(a):
@@ -421,6 +424,36 @@ def main():
     shot = a[a.index("--shot") + 1] if "--shot" in a else None
     if shot: os.environ["SDL_VIDEODRIVER"] = "dummy"; os.environ["SDL_AUDIODRIVER"] = "dummy"
     if not shot: start_log()
+    if "--bios" in a:                    # Insert Coin's own BIOS folder, and what's in it
+        from insertcoin import bios
+        copied, created = bios.set_up_own()
+        print(bios.summary(bios.check(bios.OWN_SYSTEM), bios.OWN_SYSTEM, copied, created))
+        return
+    if "--copy-art" in a:                # Insert Coin's own art folder: a checked copy of RetroArch's
+        from insertcoin import artwork
+        from paths import RA_THUMBNAILS, THUMBNAILS
+        if not os.path.isdir(RA_THUMBNAILS): print(f"RetroArch has no art folder ({RA_THUMBNAILS}): nothing to copy."); return
+        if artwork.same_folder(RA_THUMBNAILS, THUMBNAILS):
+            print("RetroArch's art folder already is Insert Coin's: nothing to copy."); return
+        files = artwork.pictures(RA_THUMBNAILS)
+        need = artwork.size_of(RA_THUMBNAILS, [f for f in files if not os.path.lexists(os.path.join(THUMBNAILS, f))])
+        os.makedirs(THUMBNAILS, exist_ok=True)
+        free = shutil.disk_usage(THUMBNAILS).free
+        if need > free * 0.9:
+            print(f"Not enough free space: the copy needs {need / 1e9:.1f} GB and {free / 1e9:.1f} GB is free. Nothing was copied."); return
+        print(f"Copying {len(files):,} pictures ({need / 1e9:.1f} GB to copy) into {THUMBNAILS}...")
+        bar = lambda what: (lambda n, t: print(f"  {what} {n:,} of {t:,}..." + " " * 10, end="\r", flush=True))
+        copied, kept, failed = artwork.copy(progress=bar("copied"))
+        print("\nChecking every picture byte for byte...")
+        problems = artwork.verify(progress=bar("checked"))
+        print("\nChecking every game's pictures in both folders...")
+        print(artwork.summary(copied, kept, failed, problems, artwork.coverage(artwork.library_games())))
+        return
+    if "--cores" in a:                   # copy (or download) the built-in player's cores into Insert Coin's folder
+        from insertcoin import coreinstall
+        print("Putting the built-in player's cores in Insert Coin's own folder (each one is test-loaded first)...")
+        print(coreinstall.summary(coreinstall.install(progress=lambda n, t, f: print(f"  {n} of {t}: {f}" + " " * 20, end="\r", flush=True))))
+        return
     if "--scan" in a:                    # report what a scan finds (changes nothing); with --add, test-start and add them
         from insertcoin.scanner import scan, summary
         print("Scanning your game folders (the first scan reads every archive's index; later ones only what changed)...")
