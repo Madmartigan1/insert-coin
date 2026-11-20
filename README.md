@@ -5,13 +5,14 @@
 Pick a system, scroll through the box art, press **A** to play. No keyboard, no settings menus —
 just your games, the way a console shows them.
 
-> **Status: 0.5.1 — early release.** Tested on Linux Mint 22.3 (Cinnamon, X11) with Xbox-style and
+> **Status: 0.6.0 — early release.** Tested on Linux Mint 22.3 (Cinnamon, X11) with Xbox-style and
 > PlayStation controllers. It hasn't been tried on other
 > setups yet, so expect rough edges and please [report them](CONTRIBUTING.md).
 >
-> Insert Coin currently needs a working RetroArch setup: it uses RetroArch's playlists, cores and
-> artwork. Since 0.4.0 it can also play most games itself (**Built-in player**, beta) — the first
-> step towards a standalone version that sets everything up for you.
+> Insert Coin currently needs a working RetroArch setup: it starts from RetroArch's playlists and
+> runs N64 games in it. Since 0.4.0 it can also play most games itself (**Built-in player**, beta),
+> and since 0.6 it can keep its own copies of the cores, BIOS files and box art — steps towards a
+> standalone version that sets everything up for you.
 
 ![Insert Coin's game screen: a box-art carousel over a blurred in-game snapshot, with the title screen in a side panel](docs/screenshots/games.png)
 

@@ -19,6 +19,6 @@
 """
 import os
 
-__version__ = "0.5.1"
+__version__ = "0.6.0"
 
 os.environ.setdefault("PYGAME_HIDE_SUPPORT_PROMPT", "1")            # before any module imports pygame
