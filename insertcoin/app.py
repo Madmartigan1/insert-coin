@@ -380,8 +380,44 @@ class App(Pads, Launcher, Screens):
         pygame.quit()
 
 
+USAGE = """Insert Coin {version} - a controller-driven, console-style game launcher.
+
+Usage: insert-coin [option]
+
+With no option it opens Insert Coin (full screen).
+
+Options:
+  --windowed             open it in a window instead
+  --scan                 look through your game folders and report games not listed yet (changes nothing)
+  --scan --add           test-start the games found and add those that start to Insert Coin's library
+  --scan --add --retry   the same, giving games left out for a black screen more starts
+  --shot DIR             render sample screens to PNG files and exit (no display needed)
+  --help, -h             show this help
+
+More: https://github.com/Madmartigan1/insert-coin#usage"""
+OPTIONS = {"--windowed", "--scan", "--add", "--retry", "--shot", "--help", "-h"}
+
+
+def check_options(a):
+    """None if the options are fine to run, else what to print and the exit code. An unknown option never opens
+    the full-screen app: it may have been a mistyped command."""
+    if "--help" in a or "-h" in a: return USAGE.format(version=__version__), 0
+    rest = a[:a.index("--shot")] + a[a.index("--shot") + 2:] if "--shot" in a else a
+    if "--shot" in a and len(a) <= a.index("--shot") + 1: return "insert-coin: --shot needs a folder\nTry: insert-coin --help", 2
+    unknown = [o for o in rest if o not in OPTIONS]
+    if unknown: return f"insert-coin: unknown option {unknown[0]}\nTry: insert-coin --help", 2
+    if ("--add" in a or "--retry" in a) and "--scan" not in a:
+        return "insert-coin: --add and --retry go with --scan (insert-coin --scan --add)\nTry: insert-coin --help", 2
+    if "--retry" in a and "--add" not in a: return "insert-coin: --retry goes with --scan --add\nTry: insert-coin --help", 2
+    return None
+
+
 def main():
     a = sys.argv[1:]
+    problem = check_options(a)
+    if problem:
+        print(problem[0], file=sys.stdout if problem[1] == 0 else sys.stderr)
+        raise SystemExit(problem[1])
     shot = a[a.index("--shot") + 1] if "--shot" in a else None
     if shot: os.environ["SDL_VIDEODRIVER"] = "dummy"; os.environ["SDL_AUDIODRIVER"] = "dummy"
     if not shot: start_log()

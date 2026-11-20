@@ -22,6 +22,7 @@ Options: --windowed   run in a window (for testing)
          --scan       look through your game folders and report games not listed yet (changes nothing)
          --scan --add test-start the games found and add those that start to Insert Coin's library
          --scan --add --retry  the same, giving games left out for a black screen more starts
+         --help, -h   list the options (an unknown option is refused; it never opens the app)
 """
 import os, sys
 

@@ -4,6 +4,16 @@ All notable changes to Insert Coin. Versions follow [semantic versioning](https:
 before 1.0, minor versions add features and patch versions fix bugs.
 Each version is also a [GitHub Release](https://github.com/Madmartigan1/insert-coin/releases).
 
+## [0.5.1] — 2026-11-20
+
+### Added
+- `insert-coin --help` (or `-h`) lists the command-line options.
+
+### Fixed
+- An option Insert Coin doesn't know (a typo such as `--hlep`, or `--help` before this
+  version) opened the full-screen app. It is now refused with a message, and so are options
+  that only work together (`--add` and `--retry` go with `--scan`).
+
 ## [0.5.0] — 2026-11-16 · "Game select"
 
 ### Added

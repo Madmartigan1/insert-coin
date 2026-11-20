@@ -5,7 +5,7 @@
 Pick a system, scroll through the box art, press **A** to play. No keyboard, no settings menus —
 just your games, the way a console shows them.
 
-> **Status: 0.5.0 — early release.** Tested on Linux Mint 22.3 (Cinnamon, X11) with Xbox-style and
+> **Status: 0.5.1 — early release.** Tested on Linux Mint 22.3 (Cinnamon, X11) with Xbox-style and
 > PlayStation controllers. It hasn't been tried on other
 > setups yet, so expect rough edges and please [report them](CONTRIBUTING.md).
 >
@@ -412,6 +412,7 @@ Start **Insert Coin** from your applications menu, or run:
 | `--scan` | Look through your game folders and report the games that aren't in your library yet, system by system — **changes nothing** (beta; see below) |
 | `--scan --add` | The same, then test-start each game found and add the ones that start to Insert Coin's own library (beta; see below) |
 | `--scan --add --retry` | The same, and give the games left out for a black screen up to 6 more starts each |
+| `--help`, `-h` | List these options. An option Insert Coin doesn't know is refused with a message; it never opens the app |
 
 ### Scanning for games (beta)
 
