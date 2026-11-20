@@ -392,11 +392,12 @@ Options:
   --scan --add           test-start the games found and add those that start to Insert Coin's library
   --scan --add --retry   the same, giving games left out for a black screen more starts
   --cores                copy the built-in player's emulator cores into Insert Coin's own folder
+  --bios                 check the BIOS files (and give Insert Coin its own BIOS folder, copied from RetroArch's)
   --shot DIR             render sample screens to PNG files and exit (no display needed)
   --help, -h             show this help
 
 More: https://github.com/Madmartigan1/insert-coin#usage"""
-OPTIONS = {"--windowed", "--scan", "--add", "--retry", "--cores", "--shot", "--help", "-h"}
+OPTIONS = {"--windowed", "--scan", "--add", "--retry", "--cores", "--bios", "--shot", "--help", "-h"}
 
 
 def check_options(a):
@@ -422,6 +423,11 @@ def main():
     shot = a[a.index("--shot") + 1] if "--shot" in a else None
     if shot: os.environ["SDL_VIDEODRIVER"] = "dummy"; os.environ["SDL_AUDIODRIVER"] = "dummy"
     if not shot: start_log()
+    if "--bios" in a:                    # Insert Coin's own BIOS folder, and what's in it
+        from insertcoin import bios
+        copied, created = bios.set_up_own()
+        print(bios.summary(bios.check(bios.OWN_SYSTEM), bios.OWN_SYSTEM, copied, created))
+        return
     if "--cores" in a:                   # copy (or download) the built-in player's cores into Insert Coin's folder
         from insertcoin import coreinstall
         print("Putting the built-in player's cores in Insert Coin's own folder (each one is test-loaded first)...")

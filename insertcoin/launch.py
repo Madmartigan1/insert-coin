@@ -2,6 +2,7 @@
 import os, pygame, signal, subprocess, sys, time, urllib.parse
 from pygame._sdl2 import controller as sdlc
 from paths import APPDIR, HERE, LOGDIR
+from insertcoin.bios import needs_missing, neogeo_bios_missing
 from insertcoin.coreinstall import own_core
 from insertcoin.logs import log
 from insertcoin.cores import core_file, is_builtin
@@ -23,6 +24,19 @@ video_fullscreen = "true"
 LAUNCH_CFG_WINDOWED = """video_fullscreen = "false"
 config_save_on_exit = "false"
 """
+
+
+def after_game(took, quit_by_user, files_missing, g):
+    """What to tell the player when a game ended badly, or None: a BIOS it needs is missing, it closed straight
+    away, or FinalBurn Neo reported files missing (a Neo Geo game may lack the BIOS too)."""
+    if took < 3 and not quit_by_user:
+        bios = needs_missing(g.core, g.path)
+        if bios: return f"This game needs {bios.title} ({bios.file}) - see insert-coin --bios"
+        return "The game closed straight away - it may need a different core"
+    if files_missing:
+        return ("Files are missing for this game; so is the Neo Geo BIOS (see insert-coin --bios)"
+                if neogeo_bios_missing() else "FinalBurn Neo says some of this game's files are missing")
+    return None
 
 
 class Launcher:
@@ -85,11 +99,15 @@ class Launcher:
             try: self.lib.note_launch(g, t0)                        # so browser games sort into Recently Played
             except Exception as e: log.warning("Could not note the launch: %s", e)
         self.back_from_game()
-        quit_by_user = False
+        quit_by_user, files_missing = False, False
         if engine:
-            try: quit_by_user = "Quit chosen from the game menu" in open(ralog, errors="replace").read()
+            try:
+                text = open(ralog, errors="replace").read()
+                quit_by_user = "Quit chosen from the game menu" in text
+                files_missing = "[FBNeo]" in text and "is required" in text   # FinalBurn Neo: the set lacks files
             except OSError: pass
-        if took < 3 and not quit_by_user: self.err("The game closed straight away - it may need a different core")
+        msg = after_game(took, quit_by_user, files_missing, g)
+        if msg: self.err(msg)
 
     def back_from_game(self):
         """The game has ended: screen, controllers (they may have changed), sound, and the lists back."""
