@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
-"""Download missing RetroArch thumbnails (box art, snaps, titles) for every playlist,
+"""Download missing thumbnails (box art, snaps, titles) for every RetroArch playlist,
 and for the games in Insert Coin's own library (library.json: e.g. games added by --scan --add).
+New pictures go into Insert Coin's own art folder (~/.local/share/insert-coin/thumbnails/); a game
+counts as having a picture when either that folder or RetroArch's has it.
 
 Usage:  python3 sync_thumbnails.py --dry   # show what would be downloaded
         python3 sync_thumbnails.py         # download
@@ -12,7 +14,7 @@ the shared "MAME" thumbnail folder, like RetroArch does.
 """
 import json, os, re, sys, glob, html, urllib.parse, urllib.request, concurrent.futures as cf
 import time
-from paths import LIBRARY, RA, THUMB_SYNC_CACHE as S
+from paths import LIBRARY, RA, RA_THUMBNAILS, THUMBNAILS, THUMB_SYNC_CACHE as S
 BASE = "https://thumbnails.libretro.com"; TYPES = ["Named_Boxarts", "Named_Snaps", "Named_Titles"]
 DRY = "--dry" in sys.argv
 os.makedirs(f"{S}/idx", exist_ok=True)
@@ -71,8 +73,9 @@ for db, label in games():
             for n in idx: km.setdefault(key(n), []).append(n)
             globals()[f"_k_{system}_{t}"] = km
         km = globals()[f"_k_{system}_{t}"]
-        local = f"{RA}/thumbnails/{system}/{t}/{sanitize(it['label'])}.png"
-        if os.path.exists(local): st["have"] += 1; continue
+        rel = f"{system}/{t}/{sanitize(it['label'])}.png"
+        local = f"{THUMBNAILS}/{rel}"                          # new pictures go to Insert Coin's own art folder
+        if os.path.exists(local) or os.path.exists(f"{RA_THUMBNAILS}/{rel}"): st["have"] += 1; continue
         src = sanitize(it["label"])
         if src in idx: st["exact"] += 1
         elif km.get(key(it["label"])): src = sorted(km[key(it["label"])], key=lambda n: rank(n, it["label"]))[0]; st["fuzzy"] += 1

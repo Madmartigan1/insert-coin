@@ -309,7 +309,7 @@ appears on the home screen after the consoles:
 | **RetroArch cores** | The cores for your systems, installed via RetroArch → *Online Updater → Core Downloader*. |
 | **RetroArch playlists** | Your games scanned into playlists (RetroArch → *Import Content*). Insert Coin shows one system per playlist. |
 | **A core per game** | Each playlist needs a default core (*Settings → Playlists → Manage Playlists → Default Core*), or each game its own core association. Games without a core can't be launched. |
-| **Thumbnails** *(optional)* | Box art, snapshots and title screens in RetroArch's thumbnails folder. See [Getting artwork](#getting-artwork-sync_thumbnailspy). |
+| **Thumbnails** *(optional)* | Box art, snapshots and title screens, in Insert Coin's or RetroArch's thumbnails folder. See [Getting artwork](#getting-artwork-sync_thumbnailspy). |
 | **Python 3.10+** | With the `venv` module (`python3-venv` on Debian/Ubuntu/Mint). |
 | **pygame-ce** | Installed automatically in the steps below. |
 | **Your own games** | Insert Coin includes **no** games, BIOS files or artwork. |
@@ -397,7 +397,9 @@ cp ~/.local/share/applications/insert-coin.desktop ~/.config/autostart/
 
 ## Getting artwork: `sync_thumbnails.py`
 
-Insert Coin uses RetroArch's thumbnails. `sync_thumbnails.py` fills in whatever is missing for
+Insert Coin keeps box art in its own folder, `~/.local/share/insert-coin/thumbnails/`, and also reads
+RetroArch's thumbnails folder: a game's picture is taken from Insert Coin's folder first, then from
+RetroArch's. `sync_thumbnails.py` fills in whatever is missing for
 **all** your playlists in one go, and for the games in Insert Coin's own library (such as those
 added by `--scan --add`), from `thumbnails.libretro.com` — the same source RetroArch's built-in
 updater uses.
@@ -406,6 +408,7 @@ updater uses.
   `(USA)` or `[!]` and prefers the same region as your copy.
 - Downloads box art, snapshots and title screens.
 - **Never overwrites** existing images — safe to re-run whenever you add games.
+- Saves new pictures in Insert Coin's own folder; a picture either folder has counts as there.
 - Needs only Python's standard library.
 
 ```bash
@@ -414,6 +417,15 @@ python3 ~/insert-coin/sync_thumbnails.py         # download
 ```
 
 A large collection can mean several gigabytes of images on the first run.
+
+### Copying RetroArch's art: `--copy-art`
+
+`insert-coin --copy-art` copies the pictures in RetroArch's thumbnails folder into Insert Coin's own,
+so Insert Coin no longer needs RetroArch's. It never replaces a picture Insert Coin's folder already has
+and never changes RetroArch's folder, and it checks there's enough free space first. Then it checks the
+copy two ways: every picture is compared byte for byte with RetroArch's, and every game in your
+library is looked up in both folders, so each game's box art, title screen and snapshot are shown to be
+there. It ends with *All checks passed*, or names what differs.
 
 ## Usage
 
@@ -428,6 +440,7 @@ Start **Insert Coin** from your applications menu, or run:
 | `--windowed` | Run in a window instead of fullscreen — games too (handy for testing next to a terminal) |
 | `--shot DIR` | Render sample screens to PNG files in `DIR` and exit — no display needed (for testing) |
 | `--bios` | Check the BIOS files the built-in player's cores can use, and give Insert Coin its own BIOS folder (a copy of RetroArch's); see below |
+| `--copy-art` | Copy RetroArch's box art into Insert Coin's own art folder and check every picture and every game; see [Copying RetroArch's art](#copying-retroarchs-art---copy-art) |
 | `--cores` | Copy the built-in player's emulator cores into Insert Coin's own folder (downloading any RetroArch doesn't have); see below |
 | `--scan` | Look through your game folders and report the games that aren't in your library yet, system by system — **changes nothing** (beta; see below) |
 | `--scan --add` | The same, then test-start each game found and add the ones that start to Insert Coin's own library (beta; see below) |
@@ -528,7 +541,7 @@ can overwrite each other's settings.
 | Path | What |
 |---|---|
 | `~/.config/retroarch/playlists/*.lpl` | Your systems and games, and each game's core |
-| `~/.config/retroarch/thumbnails/` | Box art, snapshots, title screens |
+| `~/.config/retroarch/thumbnails/` | Box art, snapshots, title screens (after Insert Coin's own folder) |
 | `~/.config/retroarch/content_history.lpl` | Recently Played |
 | `~/.config/retroarch/database/rdb/*.rdb` | Year and publisher information, and (`--scan`) the checksums and arcade set names games are recognised by |
 | `~/.config/insert-coin/browser_games.json` | Your browser and Flash game playlists (optional) |
@@ -539,6 +552,7 @@ can overwrite each other's settings.
 |---|---|
 | `~/.config/retroarch/content_favorites.lpl` | When you add/remove a favorite (only while RetroArch is closed) |
 | `~/.local/share/insert-coin/launch.cfg` | Each game launch: the in-game controller shortcuts, passed to RetroArch with `--appendconfig` |
+| `~/.local/share/insert-coin/thumbnails/` | Box art, snapshots and title screens: new ones from `sync_thumbnails.py`, and RetroArch's after `--copy-art` |
 | `~/.local/share/insert-coin/saves/` | Battery saves of games played in the built-in player |
 | `~/.cache/insert-coin/meta/` | Cached year/publisher lookups |
 | `~/.config/insert-coin/controllers.json` | Button set-ups for controllers that aren't recognised automatically |

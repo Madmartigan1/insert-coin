@@ -5,7 +5,7 @@ records - label, path, core, db - and never reads RetroArch's files itself, so a
 own library, from 0.5) can take its place."""
 import json, os
 from typing import NamedTuple
-from paths import RA
+from paths import RA, RA_THUMBNAILS, THUMBNAILS
 from insertcoin.cores import core_short
 from insertcoin.names import sanitize, split_archive, thumb_system
 
@@ -38,9 +38,18 @@ def entry(it, playlist_db, default_core):
     return Entry(label, it["path"], core, it.get("db_name") or playlist_db)
 
 
+def thumb_rel(db, label, kind):
+    """A game's picture inside an art folder (kind: Named_Boxarts, Named_Titles, Named_Snaps). RetroArch's layout."""
+    return f"{thumb_system(db)}/{kind}/{sanitize(label)}.png"
+
+
 def thumb_path(db, label, kind):
-    """Where RetroArch keeps a game's picture (kind: Named_Boxarts, Named_Titles, Named_Snaps)."""
-    return f"{RA}/thumbnails/{thumb_system(db)}/{kind}/{sanitize(label)}.png"
+    """Where a game's picture is: Insert Coin's own art folder first, then RetroArch's. When neither has it,
+    the path in RetroArch's folder (what it always was), and the menus draw a name card."""
+    rel = thumb_rel(db, label, kind)
+    for root in (THUMBNAILS, RA_THUMBNAILS):
+        if os.path.isfile(f"{root}/{rel}"): return f"{root}/{rel}"
+    return f"{RA_THUMBNAILS}/{rel}"
 
 
 class RetroArch:
