@@ -1,7 +1,7 @@
 """Search: words anywhere in a game's name, from every system; the on-screen keyboard and where B goes."""
 import os, unittest
 import support as S
-from insertcoin.library import Library
+from insertcoin.library import Library, year_range
 
 
 class Matching(unittest.TestCase):
@@ -43,6 +43,64 @@ class Matching(unittest.TestCase):
         self.assertEqual(len(Library(one_per_game=False).search("star pilot")), 5)
 
 
+class YearsAndCompanies(unittest.TestCase):
+    """A year, a decade or a company typed in the search finds the games released then, or made by it."""
+    INFO = {"Star Pilot": [1991, "Fictional Soft", "Comet Works"], "Moon Raiders": [1981, "Arcadia Corp.", ""],
+            "Turbo Tanks II": ["1994", "Fictional Soft", ""], "Byte Runner": ["", "", ""]}
+
+    @classmethod
+    def setUpClass(cls):
+        S.sample_library()
+        cls.lib = Library(one_per_game=True)
+        cls.lib.info_of = lambda g: cls.INFO.get(g.title)
+
+    def labels(self, q): return [g.label for g in self.lib.search(q)]
+
+    def test_a_year(self):
+        self.assertEqual(self.labels("1991"), ["Star Pilot (USA)"])
+        self.assertEqual(self.labels("1994"), ["Turbo Tanks II (USA)"])     # years kept as text work too
+        self.assertEqual(self.labels("1993"), [])
+
+    def test_a_decade(self):
+        self.assertEqual(self.labels("1990s"), ["Star Pilot (USA)", "Turbo Tanks II (USA)"])
+        self.assertEqual(self.labels("1980s"), ["Moon Raiders"])
+
+    def test_with_words_of_the_name(self):
+        self.assertEqual(self.labels("1991 star"), ["Star Pilot (USA)"])
+        self.assertEqual(self.labels("1991 moon"), [])                       # every word must match
+
+    def test_only_whole_years(self):
+        self.assertEqual(self.labels("199"), [])                             # still typing: not a year yet
+        self.assertEqual(year_range("1991"), (1991, 1991))
+        self.assertEqual(year_range("2000s"), (2000, 2009))
+        for word in ("199", "19911", "1234", "2"): self.assertIsNone(year_range(word))
+
+    def test_a_publisher_or_a_developer(self):
+        self.assertEqual(self.labels("fictional"), ["Star Pilot (USA)", "Turbo Tanks II (USA)"])
+        self.assertEqual(self.labels("comet works"), ["Star Pilot (USA)"])    # the developer
+        self.assertEqual(self.labels("arcadia"), ["Moon Raiders"])
+        self.assertEqual(self.labels("fictional 1994"), ["Turbo Tanks II (USA)"])
+        self.assertEqual(self.labels("fictional tanks"), ["Turbo Tanks II (USA)"])
+
+    def test_companies_from_four_letters(self):
+        self.assertEqual(self.labels("fic"), [])                             # 3 letters: game names only
+        self.assertEqual(self.labels("fict"), ["Star Pilot (USA)", "Turbo Tanks II (USA)"])
+        self.assertEqual(self.labels("arcad"), ["Moon Raiders"])
+        self.assertEqual(self.labels("ictional"), [])                        # the start of a word, not the middle
+        self.assertEqual(self.labels("corp"), ["Moon Raiders"])
+
+    def test_without_anything_known(self):
+        self.assertEqual(Library(one_per_game=True).search("1991"), [])
+        self.assertEqual(Library(one_per_game=True).search("fictional"), [])
+
+    def test_known_later(self):
+        """The databases load in the background: a search before they're read finds them once they are."""
+        lib, known = Library(one_per_game=True), {}
+        lib.info_of = lambda g: known.get(g.title)
+        self.assertEqual(lib.search("fictional"), [])
+        known.update(self.INFO)
+        self.assertEqual([g.label for g in lib.search("fictional")], ["Star Pilot (USA)", "Turbo Tanks II (USA)"])
+
 class SearchTile(unittest.TestCase):
     def test_kept_on_the_home_screen(self):
         S.sample_library()
@@ -68,6 +126,13 @@ class Screen(unittest.TestCase):
         import insert_coin as ic
         self.app = ic.App(shot=f"{S.TMP}/shots")
         self.app.style = "xbox"
+
+    def test_years_and_companies_come_from_the_databases(self):
+        star = next(g for g in self.app.lib.search("star pilot"))
+        with self.app.meta.lock: self.app.meta.data[star.system] = {"n:" + star.label: [1991, "Fictional Soft", "Comet Works"]}
+        self.assertEqual([g.label for g in self.app.lib.search("1991")], [star.label])
+        self.assertEqual([g.label for g in self.app.lib.search("comet works")], [star.label])
+        self.assertEqual(self.app.make_library().info_of, self.app.game_info)     # a new library keeps it
 
     def press(self, *acts):
         for a in acts: self.app.press(a)
@@ -117,6 +182,48 @@ class Screen(unittest.TestCase):
         self.press("down")
         self.assertEqual(app.kpos[0], 0)                                     # bottom row -> top row
 
+    def test_browse_the_games_beside_the_keyboard(self):
+        app, played = self.app, []
+        app.launch = played.append
+        self.press("search"); app.type_key("r")                              # Byte Runner, Moon Raiders
+        app.kpos = (1, 8); self.press("right")                               # O -> P: still the keyboard
+        self.assertFalse(app.in_results)
+        self.press("right")                                                  # off the right edge: the games
+        self.assertTrue(app.in_results)
+        self.assertEqual(app.kpos, (1, 9))                                   # the keyboard keeps its place
+        self.press("down")
+        self.assertEqual(app.rsel, 1)
+        self.press("down", "rb")                                             # stops at the last game
+        self.assertEqual(app.rsel, 1)
+        self.press("a")
+        self.assertEqual([g.label for g in played], ["Moon Raiders"])         # A plays the chosen one
+        self.assertEqual((app.screen_mode, app.in_results), ("search", True)) # and comes back to the list
+        self.press("lb")
+        self.assertEqual(app.rsel, 0)
+        self.press("left")                                                   # back to the keyboard, where it was
+        self.assertEqual((app.in_results, app.kpos), (False, (1, 9)))
+        self.press("right", "b")                                             # B also goes back to the keyboard
+        self.assertEqual((app.screen_mode, app.in_results), ("search", False))
+
+    def test_start_opens_the_full_list_at_the_chosen_game(self):
+        app = self.app
+        self.press("search"); app.type_key("r")
+        app.kpos = (2, 8); self.press("right", "down", "start")              # L is the end of its row
+        self.assertEqual((app.screen_mode, app.cur_game().label), ("games", "Moon Raiders"))
+
+    def test_typing_starts_the_list_again(self):
+        app = self.app
+        self.press("search"); app.type_key("r")
+        app.kpos = (1, 9); self.press("right", "down")
+        app.type_key("a")                                                    # a real keyboard types while on the list
+        self.assertEqual((app.in_results, app.rsel), (False, 0))
+
+    def test_no_games_the_keyboard_wraps(self):
+        app = self.app
+        self.press("search")
+        app.kpos = (1, 9); self.press("right")
+        self.assertEqual((app.in_results, app.kpos), (False, (1, 0)))        # P -> Q, as before
+
     def test_drawing_every_state(self):
         app = self.app
         for mode in ("systems", "search"):
@@ -124,6 +231,8 @@ class Screen(unittest.TestCase):
         for ch in "moon": app.type_key(ch)
         app.draw(); self.press("start"); app.draw()
         app.style = "keyboard"; self.press("b"); app.draw()
+        app.style = "xbox"; app.kpos = (1, 9); self.press("right"); app.draw()   # on the games beside the keyboard
+        self.assertTrue(app.in_results)
 
 
 if __name__ == "__main__":

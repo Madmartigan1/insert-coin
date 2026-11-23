@@ -230,7 +230,8 @@ class Screens:
         color = (120, 110, 210)
         self.draw_background(color, self.preview[0] if self.preview else None)
         kb = self.style == "keyboard"
-        self.draw_header("Search", "Type on your keyboard" if kb else "Type a word from the game's name")
+        hint = "a game name, a year (1991) or a company (Capcom)"
+        self.draw_header("Search", f"Type {hint} on your keyboard" if kb else f"Type {hint}")
         box = pygame.Rect(120, 170, 1060, 96)
         rrect(self.screen, (236, 238, 245), box, 22)
         f = self.fonts(46, True)
@@ -246,7 +247,7 @@ class Screens:
             x = x0 + (box.width - (len(keys) * (w + gap) - gap)) / 2
             for col, k in enumerate(keys):
                 r = pygame.Rect(round(x), y, round(w), 88)
-                on = not kb and (row, col) == (self.kpos[0], min(self.kpos[1], len(keys) - 1))
+                on = not kb and not self.in_results and (row, col) == (self.kpos[0], min(self.kpos[1], len(keys) - 1))
                 rrect(self.screen, (236, 238, 245) if on else (48, 51, 68), r, 16)
                 if not on: rrect(self.screen, (80, 85, 105), r, 16, 2)
                 text(self.screen, self.fonts(36 if not wide else 32, True), k, r.center, (20, 22, 30) if on else (235, 237, 245),
@@ -257,15 +258,21 @@ class Screens:
         px, py = 1270, 180
         n = len(self.preview)
         head = n_games(n) if n else ("No games match" if self.q.strip() else "Games appear as you type")
+        rows, sel = self.RESULT_ROWS, self.in_results and n
+        if sel: head = f"{self.rsel + 1:,} of {n:,}"
         text(self.screen, self.fonts(34, True), head, (px, py))
-        for k, g in enumerate(self.preview[:9]):
+        top = max(0, min(self.rsel - rows // 2, n - rows)) if sel else 0     # scroll so the chosen game stays in view
+        for k, g in enumerate(self.preview[top:top + rows]):
             yy = py + 70 + k * 74
-            text(self.screen, self.fonts(28, True), g.title, (px, yy), maxw=600)
+            on = sel and top + k == self.rsel
+            if on: rrect(self.screen, (236, 238, 245), pygame.Rect(px - 18, yy - 8, 640, 70), 14)
+            text(self.screen, self.fonts(28, True), g.title, (px, yy), (20, 22, 30) if on else (255, 255, 255), maxw=600, shadow=not on)
             sysname = FRIENDLY.get(g.system, (g.system,))[0]
-            text(self.screen, self.fonts(22), sysname, (px, yy + 36), (175, 180, 200), maxw=600)
-        if n > 9: text(self.screen, self.fonts(24), f"and {n - 9:,} more", (px, py + 70 + 9 * 74), (175, 180, 200))
-        self.draw_hints([("a", "Search"), ("b", "Back")] if kb else
-                        [("a", "Type"), ("x", "Delete"), ("y", "Space"), ("b", "Back")])
+            text(self.screen, self.fonts(22), sysname, (px, yy + 36), (80, 85, 105) if on else (175, 180, 200), maxw=600, shadow=not on)
+        if n > top + rows: text(self.screen, self.fonts(24), f"and {n - top - rows:,} more", (px, py + 70 + rows * 74), (175, 180, 200))
+        if sel: self.draw_hints([("a", "Play"), ("lbrb", "Page"), ("b", "Keyboard")])
+        else: self.draw_hints([("a", "Search"), ("b", "Back")] if kb else
+                              [("a", "Type"), ("x", "Delete"), ("y", "Space"), ("b", "Back")])
 
     @property
     def POWER_MENU(self):

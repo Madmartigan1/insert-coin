@@ -64,8 +64,12 @@ vice versa.
 - **Search** — the *Search* tile on the home screen, or **R3** (click the right stick) anywhere in the
   menus, opens an on-screen keyboard. Type part of a name and the matching games from every system
   appear as you type: "ninja" finds every game with that word in its name, "nin gai" narrows it
-  down, and numbers match Roman numerals ("2" finds "II"). The results open as a list you can play
-  from, and stay on the Search tile.
+  down, and numbers match Roman numerals ("2" finds "II"). Type a year to find the games released
+  that year ("1991"), a decade ("1990s"), or a company's name to find the games it developed or
+  published ("capcom"; from the 4th letter, so "capc" is enough). Mix them with words of the name to narrow it down
+  ("capcom 1991", "capcom street"). Years and companies come from RetroArch's databases, so
+  games they don't know have none. The results open as a list you can play from, and stay on the
+  Search tile.
 - **Favorites** — press **Y** on any game to add or remove it.
 - **Jump by letter** — **LB / RB** skip through long lists alphabetically.
 - **One entry per game** — the same game copied into several folders is shown once, and its
@@ -126,6 +130,11 @@ Button hints follow the controller in your hand — Xbox, PlayStation, Switch / 
 **X** deletes one, **Y** adds a space, **Start** (or the on-screen *Search* key) shows the games
 found, and **B** goes back. With a keyboard, just type: Backspace deletes, Enter searches, Esc goes
 back. From the results, **B** returns to the keyboard with your words still there.
+
+The games found are listed beside the keyboard as you type. Press **right** at the keyboard's
+right edge to move onto that list: up and down choose a game, **LB / RB** page through it, **A**
+plays the chosen game, **Start** opens it in the full results list (box art, versions, favorites),
+and **left** or **B** goes back to the keyboard.
 
 **The menu** (**B** on the home screen):
 

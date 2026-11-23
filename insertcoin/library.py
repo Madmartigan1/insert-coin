@@ -57,6 +57,17 @@ def group_versions(games, saves):
     return out
 
 
+COMPANY_FROM = 4          # letters typed before a company's name counts ("nin" is still only a game name)
+
+
+def year_range(word):
+    """(first, last) year a search word stands for: "1991" -> (1991, 1991), "1990s" -> (1990, 1999); else None."""
+    m = re.fullmatch(r"(19[5-9]\d|20[0-3]\d)", word)
+    if m: return int(word), int(word)
+    m = re.fullmatch(r"(19[5-9]|20[0-3])0s", word)
+    return (int(m[1]) * 10, int(m[1]) * 10 + 9) if m else None
+
+
 class Library:
     def __init__(self, one_per_game=True, source=None):
         self.one_per_game = one_per_game                            # False: every ROM in the playlists, as RetroArch lists them
@@ -144,20 +155,43 @@ class Library:
         self.web_favs = set(st["favorites"]) if st else set()
 
     # -- search: every game with the typed words in its name, from every system
+    info_of = None          # g -> (year, publisher, developer) from RetroArch's databases, or None; set by the app
+
     def search(self, query):
         """Games whose name has every typed word at the start of one of its words ("nin gai" finds "Ninja Gaiden";
-        Roman numerals and numbers match each other, "2" finds "II"), A-Z, from every system and browser playlist."""
+        Roman numerals and numbers match each other, "2" finds "II"), A-Z, from every system and browser playlist.
+        A year ("1991") also finds the games released that year and a decade ("1990s") those of the ten years;
+        the start of a word of the developer's or publisher's name, from COMPANY_FROM letters ("capc"), or the
+        whole word ("snk"), finds their games. Every word must match
+        one way or another, so "capcom 1991 street" narrows it down."""
         words = re.findall(r"[a-z0-9]+", query.lower())
         if not words: return []
+        years = {q: year_range(q) for q in words}
         if self._index is None:
-            self._index = []
+            self._index, self._info = [], {}
             for s in self.systems:
                 if s["special"]: continue
                 for g in s["games"]:
                     raw = re.findall(r"[a-z0-9]+", g.title.lower())
                     self._index.append((g, raw, {ROMAN.get(w, w) for w in raw}))
-        hit = lambda q, raw, num: any(w.startswith(q) for w in raw) or ROMAN.get(q, q) in num
-        found = [g for g, raw, num in self._index if all(hit(q, raw, num) for q in words)]
+
+        def info(g):                                   # (year or None, {words of the developer and publisher})
+            got = self._info.get(id(g))
+            if got is None:
+                m = self.info_of(g) if self.info_of else None
+                if not m: return None, set()                     # not known, or not loaded yet: ask again next time
+                y = str(m[0] or "")[:4]
+                got = self._info[id(g)] = (int(y) if y.isdigit() else None,
+                                           set(re.findall(r"[a-z0-9]+", " ".join(str(x or "") for x in m[1:]).lower())))
+            return got
+
+        def hit(q, g, raw, num):
+            if any(w.startswith(q) for w in raw) or ROMAN.get(q, q) in num: return True
+            y, makers = info(g)
+            if q in makers or (len(q) >= COMPANY_FROM and any(w.startswith(q) for w in makers)): return True
+            span = years[q]
+            return bool(span) and y is not None and span[0] <= y <= span[1]
+        found = [g for g, raw, num in self._index if all(hit(q, g, raw, num) for q in words)]
         return sorted(found, key=lambda g: (g.key, ORDER.get(g.system, 99)))
 
     def set_search(self, query):

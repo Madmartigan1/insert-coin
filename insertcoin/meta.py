@@ -1,4 +1,4 @@
-"""Year and publisher, read from RetroArch's databases."""
+"""Year, publisher and developer, read from RetroArch's databases."""
 import json, os, threading
 from paths import CACHE, RA
 from insertcoin.names import sanitize, split_archive
@@ -52,7 +52,7 @@ class Meta:
     def _load(self, dbs):
         os.makedirs(f"{CACHE}/meta", exist_ok=True)
         for db in dbs:
-            src = f"{RA}/database/rdb/{db}.rdb"; cp = f"{CACHE}/meta/{sanitize(db)}.json"
+            src = f"{RA}/database/rdb/{db}.rdb"; cp = f"{CACHE}/meta/{sanitize(db)}.v2.json"   # v2: + developer
             if not os.path.exists(src): continue
             try:
                 if os.path.exists(cp) and os.path.getmtime(cp) >= os.path.getmtime(src):
@@ -62,10 +62,13 @@ class Meta:
                     for e in _rdb_load(src):
                         yr = e.get("releaseyear"); pub = e.get("publisher") or e.get("developer")
                         if not (yr or pub): continue
-                        v = [yr or "", pub or ""]
+                        dev = e.get("developer") or ""
+                        v = [yr or "", pub or "", dev if dev != pub else ""]   # shown: year, publisher
                         if e.get("name"): m.setdefault("n:" + e["name"], v)
                         if e.get("rom_name"): m.setdefault("r:" + os.path.splitext(e["rom_name"])[0], v)
-                    json.dump(m, open(cp, "w"))
+                    with open(cp, "w") as f: json.dump(m, f)
+                    old = f"{CACHE}/meta/{sanitize(db)}.json"                   # the cache before v2
+                    if os.path.exists(old): os.remove(old)
                 with self.lock: self.data[db] = m
             except Exception:
                 pass

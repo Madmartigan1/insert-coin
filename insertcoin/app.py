@@ -51,6 +51,7 @@ class App(Pads, Launcher, Screens):
         self.prev_bg = None; self.bg_change = 0
         self.hold = {}; self.quit_sel = 1; self.vlist = []; self.vsel = 0
         self.q = ""; self.kpos = (1, 0); self.preview = []; self.back_to = (self.si, "systems")   # the search screen
+        self.in_results, self.rsel = False, 0          # the pad is on the list of games beside the keyboard, at rsel
         self.clock = pygame.time.Clock()
         if self.lib_note: self.say(self.library_message(), 4.0)
 
@@ -65,7 +66,14 @@ class App(Pads, Launcher, Screens):
         """The game library from the source the "library" setting names (RetroArch's playlists or Insert Coin's)."""
         self.lib_kind, source, self.lib_note = open_source(self.settings.get("library"))
         log.info("Library: %s", "Insert Coin (beta)" if self.lib_kind == "insertcoin" else "RetroArch playlists")
-        return Library(one_per_game=self.settings["one_per_game"], source=source)
+        lib = Library(one_per_game=self.settings["one_per_game"], source=source)
+        lib.info_of = self.game_info
+        return lib
+
+    def game_info(self, g):
+        """[year, publisher, developer] from RetroArch's databases (or browser_games.json); None if unknown or
+        not loaded yet. Search uses it for years and company names."""
+        return self.meta.get(g) if getattr(self, "meta", None) else None
 
     # -- current state helpers
     @property
@@ -202,7 +210,7 @@ class App(Pads, Launcher, Screens):
     def open_search(self):
         if self.screen_mode not in ("systems", "games") or not any(s["id"] == "search" for s in self.lib.systems): return
         self.back_to = (self.si, self.screen_mode)
-        self.q = self.lib.query; self.preview = self.lib.search(self.q)
+        self.q = self.lib.query; self.preview = self.lib.search(self.q); self.in_results, self.rsel = False, 0
         self.screen_mode = "search"; self.hold.clear(); self.sfx.play("menu")
 
     def type_key(self, ch):
@@ -210,15 +218,15 @@ class App(Pads, Launcher, Screens):
         if ch == "Delete": self.q = self.q[:-1]
         elif ch == "Space": self.q = self.q + " " if self.q and not self.q.endswith(" ") else self.q
         elif len(self.q) < 40: self.q += ch.lower()
-        self.preview = self.lib.search(self.q); self.sfx.play("move")
+        self.preview = self.lib.search(self.q); self.rsel = 0; self.in_results = False; self.sfx.play("move")
 
-    def run_search(self):
-        """Show what was found in the Search list (on the home screen's Search tile)."""
+    def run_search(self, at=0):
+        """Show what was found in the Search list (on the home screen's Search tile), at game number `at`."""
         if not self.q.strip(): self.err("Type part of a game's name first"); return
         found = self.lib.set_search(self.q)
         if not found: self.err(f"No games found for \u201c{self.q.strip()}\u201d"); return
         self.si = next(i for i, s in enumerate(self.lib.systems) if s["id"] == "search")
-        self.gi["search"] = 0; self.gpos = 0.0; self.spos = float(self.si)
+        at = min(at, len(found) - 1); self.gi["search"] = at; self.gpos = float(at); self.spos = float(self.si)
         self.screen_mode = "games"; self.sfx.play("select")
 
     def key_at(self, row, col):
@@ -227,6 +235,9 @@ class App(Pads, Launcher, Screens):
     def move_key(self, act):
         """Move on the keyboard; up and down keep to the key nearest the same spot."""
         row, col = self.kpos
+        if act == "right" and min(col, len(self.KEYS[row]) - 1) == len(self.KEYS[row]) - 1 and self.preview:
+            self.in_results = True; self.rsel = min(self.rsel, len(self.preview) - 1)   # off the right edge: the games
+            self.sfx.play("move"); return
         if act in ("left", "right"):
             n = len(self.KEYS[row]); col = (min(col, n - 1) + (1 if act == "right" else -1)) % n
         else:
@@ -235,7 +246,23 @@ class App(Pads, Launcher, Screens):
             col = min(len(self.KEYS[row]) - 1, int(frac * len(self.KEYS[row])))
         self.kpos = (row, col); self.sfx.play("move")
 
+    RESULT_ROWS = 9                                     # games shown at once beside the keyboard
+
+    def results_press(self, act):
+        """On the list of games beside the keyboard: move, page with LB / RB, A plays, Start opens the full list
+        (box art, versions, favorites) at that game, Left or B goes back to the keyboard."""
+        n = len(self.preview)
+        if act in ("up", "down", "lb", "rb"):
+            step = {"up": -1, "down": 1, "lb": -self.RESULT_ROWS, "rb": self.RESULT_ROWS}[act]
+            new = max(0, min(n - 1, self.rsel + step))
+            if new != self.rsel: self.rsel = new; self.sfx.play("move")
+        elif act == "a": self.launch(self.preview[self.rsel])
+        elif act == "start": self.run_search(at=self.rsel)
+        elif act in ("left", "b"): self.in_results = False; self.sfx.play("back")
+
     def search_press(self, act):
+        if self.in_results and self.preview: return self.results_press(act)
+        self.in_results = False
         if act in ("left", "right", "up", "down"): self.move_key(act)
         elif act == "a":
             k = self.key_at(*self.kpos)
@@ -358,7 +385,7 @@ class App(Pads, Launcher, Screens):
         """On the search screen a real keyboard types: letters, digits, space, Backspace, Enter searches.
         Returns True when the key was used here."""
         if e.key == pygame.K_BACKSPACE: self.type_key("Delete"); return True
-        if e.key in (pygame.K_RETURN, pygame.K_KP_ENTER): self.run_search(); return True
+        if e.key in (pygame.K_RETURN, pygame.K_KP_ENTER): self.run_search(at=self.rsel if self.in_results else 0); return True
         if e.key == pygame.K_SPACE: self.type_key("Space"); return True
         ch = e.unicode or ""
         if len(ch) == 1 and ch.isalnum() and ch.isascii(): self.type_key(ch); return True
