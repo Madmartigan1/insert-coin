@@ -230,7 +230,7 @@ class Screens:
         color = (120, 110, 210)
         self.draw_background(color, self.preview[0] if self.preview else None)
         kb = self.style == "keyboard"
-        hint = "a game name, a year (1991) or a company (Capcom)"
+        hint = "a game name, a year (1991), a decade (1990s) or a company (Capcom)"
         self.draw_header("Search", f"Type {hint} on your keyboard" if kb else f"Type {hint}")
         box = pygame.Rect(120, 170, 1060, 96)
         rrect(self.screen, (236, 238, 245), box, 22)
