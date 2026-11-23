@@ -4,6 +4,20 @@ All notable changes to Insert Coin. Versions follow [semantic versioning](https:
 before 1.0, minor versions add features and patch versions fix bugs.
 Each version is also a [GitHub Release](https://github.com/Madmartigan1/insert-coin/releases).
 
+## [0.6.1] — 2026-11-23
+
+### Added
+- **Search by year and company.** Type a year ("1991") to find the games released that year, a
+  decade ("1990s"), or a developer's or publisher's name ("capcom"; from the 4th letter, so
+  "capc" is enough). Mix them with words of the name to narrow it down ("capcom 1991",
+  "capcom street"). Years and companies come from RetroArch's databases.
+- **Browse the games beside the keyboard.** Press right at the keyboard's right edge to move onto
+  the games found: up / down choose, LB / RB page, A plays, Start opens the full results list at
+  that game, and left or B goes back to the keyboard.
+
+### Changed
+- The search screen says what you can type: a game name, a year or a company.
+
 ## [0.6.0] — 2026-11-20 · "Power On"
 
 ### Added
