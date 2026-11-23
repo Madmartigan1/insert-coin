@@ -4,6 +4,12 @@ All notable changes to Insert Coin. Versions follow [semantic versioning](https:
 before 1.0, minor versions add features and patch versions fix bugs.
 Each version is also a [GitHub Release](https://github.com/Madmartigan1/insert-coin/releases).
 
+## [0.6.2] — 2026-11-23
+
+### Changed
+- The search screen's hint line also mentions decades: "Type a game name, a year (1991), a
+  decade (1990s) or a company (Capcom)".
+
 ## [0.6.1] — 2026-11-23
 
 ### Added
