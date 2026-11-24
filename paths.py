@@ -18,6 +18,7 @@ LOGDIR = f"{os.environ.get('XDG_STATE_HOME') or HOME + '/.local/state'}/insert-c
 CONFDIR = os.environ.get("INSERT_COIN_CONFIG") or f"{HOME}/.config/insert-coin"
 SAVES = os.environ.get("INSERT_COIN_SAVES") or f"{APPDIR}/saves"
 STATES = os.environ.get("INSERT_COIN_STATES") or f"{APPDIR}/states"   # save states: <core>/<game>.slotN.state + .png
+PICTURE = f"{CONFDIR}/picture.json"         # the built-in player's picture look per system (sharp / smooth / scanlines)
 LIBRARY = f"{APPDIR}/library.json"                                    # Insert Coin's own game library (B menu: Library)
 FAVORITES = f"{APPDIR}/favorites.json"                                # ...its Favorites
 HISTORY = f"{APPDIR}/history.json"                                    # ...and Recently Played

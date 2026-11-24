@@ -1,6 +1,7 @@
 """Save states in the built-in player: 4 slots per game with a picture, the pause menu's slot screens, the
-overwrite question, cores without states, and the hidden start-up run some arcade games need first."""
-import ctypes as C, os, unittest
+overwrite question, cores without states, the hidden start-up run some arcade games need first, the Continue
+point, and the picture look chosen per system."""
+import ctypes as C, json, os, unittest
 import support  # noqa: F401  (sets up a throwaway HOME before anything else is imported)
 import pygame
 import engine
@@ -38,8 +39,9 @@ class Sound:
     def push(self, data): self.pushed += 1
 
 
-def player(core="mesen", takes_from=0):
+def player(core="mesen", takes_from=0, system=None):
     p = Player.__new__(Player)
+    p.system, p.scan_cache, p.picture = system, {}, "sharp"
     p.core_path, p.name, p.game_name, p.title = CORE(core), core.title(), "Star Pilot (USA)", None
     p.probe, p.shot, p.frames_left, p.audio, p.rotation, p.frame = False, None, None, None, 0, None
     p.av = engine.AVInfo(); p.av.geometry.aspect_ratio = 4 / 3
@@ -78,8 +80,8 @@ class Slots(unittest.TestCase):
         self.assertEqual(p.lib.frames, 100)
 
     def test_menu_has_save_and_load(self):
-        self.assertEqual(player().MENU, ("Resume", "Save state", "Load state", "Quit game"))
-        self.assertEqual(player("fbneo").MENU, ("Resume", "Save state", "Load state", "Controls", "Quit game"))
+        self.assertEqual(player().MENU, ("Resume", "Save state", "Load state", "Picture", "Quit game"))
+        self.assertEqual(player("fbneo").MENU, ("Resume", "Save state", "Load state", "Picture", "Controls", "Quit game"))
 
     def test_saving_in_an_empty_slot_needs_no_question(self):
         p = player("pcsx_rearmed"); self.run_frames(p, 10)
@@ -210,6 +212,74 @@ class ContinuePoint(unittest.TestCase):
         p = player("mame2003_plus", takes_from=1800); p.paused, p.mode = True, "ask"
         p.menu_key("ok")
         self.assertEqual(p.lib.run_at_load, 1800); self.assertEqual(p.lib.frames, 9000)
+
+
+NES = "Nintendo - Nintendo Entertainment System"
+
+
+class PictureLook(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        pygame.display.init(); pygame.font.init()
+
+    def setUp(self):
+        if os.path.exists(engine.PICTURE): os.remove(engine.PICTURE)
+
+    def started(self, core="mesen", system=NES):
+        p = player(core, system=system); p.picture = p.load_picture(); return p
+
+    def test_sharp_until_chosen(self):
+        self.assertEqual(self.started().picture, "sharp")
+
+    def test_chosen_in_the_menu_for_the_whole_system(self):
+        p = self.started(); p.set_pause(True); p.menu_sel = p.MENU.index("Picture")
+        p.menu_key("right"); self.assertEqual(p.picture, "smooth")
+        self.assertIn("for every NES game", p.osd[0])          # the system's own name
+        p.menu_key("ok"); self.assertEqual(p.picture, "scanlines")
+        p.menu_key("right"); self.assertEqual(p.picture, "sharp")                 # round again
+        p.menu_key("left"); self.assertEqual(p.picture, "scanlines")
+        self.assertTrue(p.paused)                                               # the menu stays open to compare
+        self.assertEqual(self.started().picture, "scanlines")                     # another game of that system
+        self.assertEqual(self.started("vbam", "Nintendo - Game Boy").picture, "sharp")   # other systems unchanged
+        self.assertEqual(json.load(open(engine.PICTURE)), {NES: "scanlines"})
+
+    def test_without_a_system_the_core_name_is_used(self):
+        p = self.started("blastem", system=None); p.set_picture("smooth")
+        self.assertEqual(json.load(open(engine.PICTURE)), {"Blastem": "smooth"})
+
+    def test_test_runs_and_bad_files_change_nothing(self):
+        p = self.started(); p.probe = True; p.set_picture("smooth")
+        self.assertFalse(os.path.exists(engine.PICTURE))
+        os.makedirs(os.path.dirname(engine.PICTURE), exist_ok=True)
+        for bad in ("{not json", "[1, 2]", '{"%s": "neon"}' % NES):
+            open(engine.PICTURE, "w").write(bad)
+            self.assertEqual(self.started().picture, "sharp")
+        self.started().set_picture("smooth")                                     # a broken file is replaced on choosing
+        self.assertEqual(json.load(open(engine.PICTURE)), {NES: "smooth"})
+
+    def picture(self, look, rotation=0):
+        p = player(); p.picture = look; p.rotation = rotation
+        img = pygame.Surface((4, 4), 0, 16); img.fill((255, 255, 255))
+        img.fill((0, 0, 0), (0, 0, 2, 4))                                       # left half black
+        return p.scaled(img, 40, 40)
+
+    def test_sharp_keeps_hard_edges(self):
+        out = self.picture("sharp")
+        self.assertEqual({tuple(out.get_at((x, 20)))[:3] for x in range(40)}, {(0, 0, 0), (255, 255, 255)})
+
+    def test_smoothed_blends_the_edges(self):
+        out = self.picture("smooth"); self.assertEqual(out.get_size(), (40, 40))
+        greys = {out.get_at((x, 20))[0] for x in range(40)}
+        self.assertTrue(any(0 < g < 255 for g in greys), greys)
+
+    def test_scanlines_darken_every_line(self):
+        out = self.picture("scanlines")
+        col = [out.get_at((30, y))[0] for y in range(40)]                       # down the white half
+        self.assertEqual(col.count(255) + col.count(140), 40)
+        self.assertEqual(col[:10], [255] * 6 + [140] * 4)                       # 4 source lines, 10 px each
+        out = self.picture("scanlines", rotation=1)                              # a turned arcade screen
+        row = [out.get_at((x, 30))[0] for x in range(20, 40)]                    # across the white half
+        self.assertEqual(row[:10], [255] * 6 + [140] * 4)                       # the lines run up and down
 
 
 if __name__ == "__main__":

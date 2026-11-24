@@ -5,12 +5,13 @@ libretro is the small, MIT-licensed interface that emulator cores (Mesen, FBNeo,
 speak. This file is the "frontend" side of it: it loads a core, gives it the game, shows its picture,
 plays its sound, feeds it the controllers and keeps its save files.
 
-    engine.py CORE.so ROM [--title NAME] [--windowed] [--frames N --shot FILE.png]
+    engine.py CORE.so ROM [--title NAME] [--system PLAYLIST] [--windowed] [--frames N --shot FILE.png]
 
 ROM may be a plain file, a zip, or RetroArch-style "archive.zip#file.nes".
 In a game: Select + Start (or Esc) pauses and opens a small menu: Resume / Save state / Load state /
 Controls (arcade games) / Quit game. Save states: 4 slots per game, each with a picture and the date.
-Quitting keeps a Continue point (after ~10 s of play); the next start asks Continue / Start over.
+Picture (sharp / smoothed / scanlines) is chosen there too, for every game of that system (--system,
+the playlist name; the core's name without it). Quitting keeps a Continue point (after ~10 s of play); the next start asks Continue / Start over.
 Controls changes which button does what, for this game only (saved per game). The keyboard is
 also passed to the core, so e.g. Tab opens MAME's own menu in arcade games.
 
@@ -31,8 +32,9 @@ from pygame._sdl2 import audio as sdla
 
 if os.path.dirname(os.path.abspath(__file__)) not in sys.path:     # also when loaded with runpy (docs/make_screenshots.py)
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from paths import RA, APPDIR, SAVES, STATES, SYSTEM, CONFDIR
+from paths import RA, APPDIR, SAVES, STATES, SYSTEM, CONFDIR, PICTURE
 from insertcoin.cores import has_face_turbo, has_states, has_turbo, is_arcade, state_warmup
+from insertcoin.systems import FRIENDLY
 W, H = 1920, 1080
 
 def split_archive(path):
@@ -199,7 +201,8 @@ class AudioOut:
 
 # ---------------------------------------------------------------- the player
 class Player:
-    def __init__(self, core_path, rom, windowed=False, frames=None, shot=None, press=None, title=None, probe=False):
+    def __init__(self, core_path, rom, windowed=False, frames=None, shot=None, press=None, title=None, probe=False,
+                 system=None):
         self.core_path, self.rom, self.frames_left, self.shot = core_path, rom, frames, shot
         self.probe = probe; self.lit = self.looked = 0                # --probe: frames looked at, and those not black
         self.lib = C.CDLL(core_path)
@@ -217,6 +220,7 @@ class Player:
         fp = pygame.font.match_font("ubuntu,notosans,dejavusans", bold=True)
         self.font = lambda n, _c={}: _c.setdefault(n, pygame.font.Font(fp, n))
         self.av = AVInfo()                                    # some cores report their size while loading
+        self.system = system; self.scan_cache = {}
 
         flags = 0 if shot or probe else pygame.SCALED | (0 if windowed else pygame.FULLSCREEN)
         self.screen = pygame.display.set_mode((W, H), flags, vsync=0 if shot or probe else 1)
@@ -256,6 +260,7 @@ class Player:
         self.keymap = {rk: pk for rk, pk in retro_keymap().items() if pk not in self.KEYS}   # pad keys stay pad keys
         self.clock = pygame.time.Clock()
         self.ask_sel = 0
+        self.picture = self.load_picture()
         if self.interactive and self.can_save_state() and self.slot_time("continue") is not None:
             self.paused = True; self.mode = "ask"                  # "Continue where you left off?" before the game runs
             log("INFO", "Asking: continue or start over")
@@ -612,10 +617,66 @@ class Player:
             if self.rotation % 2: aspect = 1 / aspect
             th = H; tw = round(th * aspect)
             if tw > W: tw = W; th = round(W / aspect)
-            self.screen.blit(pygame.transform.scale(img, (tw, th)), ((W - tw) // 2, (H - th) // 2))  # sharp pixels
+            self.screen.blit(self.scaled(img, tw, th), ((W - tw) // 2, (H - th) // 2))
         if self.paused: self.draw_menu()
         self.draw_osd()                                       # on top, so "Saved in slot 2" shows over the menu
         pygame.display.flip()
+
+    # -- picture look, per system: sharp pixels, smoothed, or scanlines like a CRT
+    LOOKS = ("sharp", "smooth", "scanlines")
+    LOOK_NAMES = {"sharp": "Sharp", "smooth": "Smoothed", "scanlines": "Scanlines"}
+
+    @property
+    def system_key(self): return self.system or self.name
+
+    @property
+    def system_label(self):
+        return FRIENDLY[self.system][0] if self.system in FRIENDLY else (self.system or self.name)
+
+    def load_picture(self):
+        try: v = json.load(open(PICTURE)).get(self.system_key)
+        except (OSError, ValueError, AttributeError): v = None
+        return v if v in self.LOOKS else "sharp"
+
+    def set_picture(self, look):
+        self.picture = look
+        if not self.interactive: return                       # test runs change nothing on disk
+        try:
+            try: d = json.load(open(PICTURE))
+            except (OSError, ValueError): d = {}
+            if not isinstance(d, dict): d = {}
+            d[self.system_key] = look
+            os.makedirs(os.path.dirname(PICTURE), exist_ok=True)
+            with open(PICTURE + ".tmp", "w") as f: json.dump(d, f, indent=1, sort_keys=True)
+            os.replace(PICTURE + ".tmp", PICTURE)
+            log("INFO", f"Picture: {look} for {self.system_key}")
+        except OSError as e: log("WARN", f"Picture setting not saved: {e}")
+
+    def scaled(self, img, tw, th):
+        """The game picture at (tw, th) in the chosen look."""
+        w, h = img.get_size()
+        if self.picture == "smooth":                          # soft edges, like a TV's blur (bilinear)
+            if img.get_bitsize() not in (24, 32): img = img.convert(32)      # (smoothscale needs 24 / 32-bit colour)
+            return pygame.transform.smoothscale(img, (tw, th))
+        if self.picture == "scanlines" and img.get_bitsize() != 32:
+            img = img.convert(32)                             # 32-bit colour: blending is many times faster
+        out = pygame.transform.scale(img, (tw, th))           # sharp pixels
+        if self.picture == "scanlines":
+            vertical = self.rotation % 2 == 1                 # turned arcade screens: the lines run up and down
+            lines = w if vertical else h
+            if lines > 300: lines //= 2                       # high-resolution modes: lines of the TV, not of the picture
+            key = (tw, th, lines, vertical)
+            if key not in self.scan_cache:
+                ov = pygame.Surface((tw, th), 0, out); ov.fill((255, 255, 255))
+                size = tw if vertical else th; step = size / lines
+                dark = max(1, round(step * 0.4))
+                for i in range(lines):
+                    end = round((i + 1) * step)
+                    band = (end - dark, 0, dark, th) if vertical else (0, end - dark, tw, dark)
+                    ov.fill((140, 140, 140), band)
+                self.scan_cache = {key: ov}
+            out.blit(self.scan_cache[key], (0, 0), special_flags=pygame.BLEND_MULT)
+        return out
 
     # -- sound
     def sample(self, l, r):
@@ -722,7 +783,7 @@ class Player:
     @property
     def MENU(self):
         """Controls only for arcade games: home-console games have their own button settings in their menus."""
-        return (("Resume", "Save state", "Load state") + (("Controls",) if is_arcade(self.core_path, self.name) else ())
+        return (("Resume", "Save state", "Load state", "Picture") + (("Controls",) if is_arcade(self.core_path, self.name) else ())
                 + ("Quit game",))
 
     def core_message(self, text, seconds):
@@ -804,6 +865,10 @@ class Player:
         if k == "up": self.menu_sel = (self.menu_sel - 1) % len(self.MENU)
         elif k == "down": self.menu_sel = (self.menu_sel + 1) % len(self.MENU)
         elif k == "back": self.set_pause(False)
+        elif k in ("ok", "left", "right") and self.MENU[self.menu_sel] == "Picture":
+            i = (self.LOOKS.index(self.picture) + (-1 if k == "left" else 1)) % len(self.LOOKS)
+            self.set_picture(self.LOOKS[i])
+            self.core_message(f"Picture: {self.LOOK_NAMES[self.picture]}, for every {self.system_label} game", 3)
         elif k == "ok":
             item = self.MENU[self.menu_sel]
             if item == "Resume": self.set_pause(False)
@@ -933,6 +998,7 @@ class Player:
             r = pygame.Rect(0, 0, 420, 72); r.center = (W // 2, box.top + 150 + k * 96)
             on = k == self.menu_sel
             pygame.draw.rect(self.screen, (230, 232, 240) if on else (55, 58, 75), r, border_radius=20)
+            if label == "Picture": label = f"\u2039  Picture: {self.LOOK_NAMES[getattr(self, 'picture', 'sharp')]}  \u203a"
             t = self.font(32).render(label, True, (20, 22, 30) if on else (230, 232, 240)); self.screen.blit(t, t.get_rect(center=r.center))
 
     def glyph(self, text, center, on=False):
@@ -1055,8 +1121,9 @@ def main():
             name, rng = a[k + 1].rsplit("@", 1); f0, f1 = (rng.split("-") + [rng])[:2]
             press.append((name.lower(), int(f0), int(f1)))
     title = a[a.index("--title") + 1] if "--title" in a else None
+    system = a[a.index("--system") + 1] if "--system" in a else None
     p = Player(a[0], a[1], windowed="--windowed" in a, frames=frames, shot=shot, press=press, title=title,
-               probe="--probe" in a)
+               probe="--probe" in a, system=system)
     code = 0
     try: p.run()
     except BaseException as e:
