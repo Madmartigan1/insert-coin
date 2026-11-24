@@ -10,6 +10,7 @@ plays its sound, feeds it the controllers and keeps its save files.
 ROM may be a plain file, a zip, or RetroArch-style "archive.zip#file.nes".
 In a game: Select + Start (or Esc) pauses and opens a small menu: Resume / Save state / Load state /
 Controls (arcade games) / Quit game. Save states: 4 slots per game, each with a picture and the date.
+Quitting keeps a Continue point (after ~10 s of play); the next start asks Continue / Start over.
 Controls changes which button does what, for this game only (saved per game). The keyboard is
 also passed to the core, so e.g. Tab opens MAME's own menu in arcade games.
 
@@ -254,6 +255,15 @@ class Player:
         self.load_remap()
         self.keymap = {rk: pk for rk, pk in retro_keymap().items() if pk not in self.KEYS}   # pad keys stay pad keys
         self.clock = pygame.time.Clock()
+        self.ask_sel = 0
+        if self.interactive and self.can_save_state() and self.slot_time("continue") is not None:
+            self.paused = True; self.mode = "ask"                  # "Continue where you left off?" before the game runs
+            log("INFO", "Asking: continue or start over")
+
+    @property
+    def interactive(self):
+        """A real game session (not a test start, a screenshot or a fixed number of frames)."""
+        return not (self.probe or self.shot or self.frames_left is not None)
 
     # -- core options: the core's defaults, with the user's RetroArch choices on top
     def load_ra_options(self):
@@ -441,6 +451,48 @@ class Player:
             self.warming = False
             if self.audio:
                 with self.audio.lock: self.audio.buf.clear()
+
+    CONTINUE_MIN = 600                                       # frames (~10 s) of play before quitting keeps a Continue point
+
+    def keep_continue(self, played):
+        """On quitting: keep this moment as the game's Continue point, offered at its next start."""
+        if not self.interactive or played < self.CONTINUE_MIN or not self.can_save_state(): return False
+        return self.save_state("continue")
+
+    def ask_key(self, k):
+        if k in ("left", "right", "up", "down"): self.ask_sel ^= 1
+        elif k in ("ok", "back"):
+            start_over = k == "back" or self.ask_sel == 1
+            self.set_pause(False)
+            if start_over: log("INFO", "Starting over")
+            elif self.load_state("continue"): self.core_message("Continued where you left off", 2)
+            else: self.core_message("Couldn't continue: starting over", 3)
+
+    def draw_ask(self):
+        self.screen.fill((0, 0, 0))
+        box = pygame.Rect(0, 0, 820, 700); box.center = (W // 2, H // 2)
+        pygame.draw.rect(self.screen, (28, 30, 42), box, border_radius=28)
+        pygame.draw.rect(self.screen, (90, 95, 115), box, 3, border_radius=28)
+        t = self.font(40).render("Continue where you left off?", True, (255, 255, 255))
+        self.screen.blit(t, t.get_rect(midtop=(W // 2, box.top + 30)))
+        t = self.font(24).render(f"{self.title or self.game_name}"[:70], True, (160, 165, 185))
+        self.screen.blit(t, t.get_rect(midtop=(W // 2, box.top + 86)))
+        pic = pygame.Rect(0, 0, 560, 360); pic.midtop = (W // 2, box.top + 132)
+        pygame.draw.rect(self.screen, (12, 12, 18), pic, border_radius=10)
+        img = self.slot_picture("continue", pic.size)
+        if img: self.screen.blit(img, img.get_rect(center=pic.center))
+        when = self.slot_time("continue")
+        if when is not None:
+            t = self.font(24).render(time.strftime("%d %b %Y  %H:%M", time.localtime(when)).lstrip("0"), True, (160, 165, 185))
+            self.screen.blit(t, t.get_rect(midtop=(W // 2, pic.bottom + 12)))
+        for k, label in enumerate(("Continue", "Start over")):
+            r = pygame.Rect(0, 0, 280, 72); r.center = (W // 2 + (k * 2 - 1) * 160, box.bottom - 110)
+            on = k == self.ask_sel
+            pygame.draw.rect(self.screen, (230, 232, 240) if on else (55, 58, 75), r, border_radius=20)
+            t = self.font(30).render(label, True, (20, 22, 30) if on else (230, 232, 240)); self.screen.blit(t, t.get_rect(center=r.center))
+        ok, back = self.menu_buttons()
+        t = self.symfont(22).render(f"{ok}  Choose   \u00b7   {back}  Start over", True, (160, 165, 185))
+        self.screen.blit(t, t.get_rect(midbottom=(W // 2, box.bottom - 18)))
 
     def slot_time(self, slot):
         """When the slot was saved (seconds since 1970), or None if it is empty."""
@@ -719,7 +771,7 @@ class Player:
                 continue
             if e.type == pygame.KEYDOWN:
                 if e.key == pygame.K_ESCAPE:
-                    if self.paused and self.mode in ("controls", "slots", "confirm"): self.menu_key("back")
+                    if self.paused and self.mode in ("controls", "slots", "confirm", "ask"): self.menu_key("back")
                     else: self.set_pause(not self.paused)
                 elif self.paused: self.menu_key({pygame.K_UP: "up", pygame.K_DOWN: "down", pygame.K_LEFT: "left",
                                                  pygame.K_RIGHT: "right", pygame.K_RETURN: "ok",
@@ -748,6 +800,7 @@ class Player:
         if self.mode == "controls": return self.controls_key(k)
         if self.mode == "slots": return self.slots_key(k)
         if self.mode == "confirm": return self.confirm_key(k)
+        if self.mode == "ask": return self.ask_key(k)
         if k == "up": self.menu_sel = (self.menu_sel - 1) % len(self.MENU)
         elif k == "down": self.menu_sel = (self.menu_sel + 1) % len(self.MENU)
         elif k == "back": self.set_pause(False)
@@ -868,6 +921,7 @@ class Player:
 
     def draw_menu(self):
         mode = getattr(self, "mode", "pause")
+        if mode == "ask": return self.draw_ask()
         if mode in ("slots", "confirm"): return self.draw_slots()
         if mode != "pause": return self.draw_controls()
         dim = pygame.Surface((W, H), pygame.SRCALPHA); dim.fill((0, 0, 0, 160)); self.screen.blit(dim, (0, 0))
@@ -930,7 +984,7 @@ class Player:
         t = self.font(22).render(hint, True, (160, 165, 185)); self.screen.blit(t, t.get_rect(midbottom=(W // 2, box.bottom - 24)))
 
     def run(self):
-        last_save = time.time(); frames = 0
+        last_save = time.time(); frames = 0; quit_ok = False
         try:
             while self.running:
                 self.events()
@@ -953,10 +1007,14 @@ class Player:
                 if not self.audio or self.shot: self.clock.tick(self.av.timing.fps or 60)
                 if self.frames_left is not None and frames >= self.frames_left: break
                 if time.time() - last_save > 30: self.save_sram(); last_save = time.time()
+            quit_ok = True
         finally:
             if self.shot and self.frame: pygame.image.save(self.screen, self.shot); log("INFO", f"Screenshot: {self.shot}")
             if self.probe: log("INFO", f"Probe: {self.lit} of {self.looked} frames lit")
             self.save_sram()
+            if quit_ok:                                      # not after an error: the core may be in a bad state
+                try: self.keep_continue(frames)
+                except Exception as e: log("WARN", f"No Continue point: {e}")
             # the save is safe now; if a core (or the sound device) hangs while closing, don't leave the player stuck
             snd = f", {self.audio.produced / 4 / self.audio.rate:.1f} s of sound" if self.audio else ", no sound"
             def watchdog():
