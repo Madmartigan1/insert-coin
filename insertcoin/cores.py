@@ -16,6 +16,9 @@ class Core(NamedTuple):
     arcade: bool = False        # arcade games: the built-in player's pause menu offers Controls
     turbo: bool = False         # two-button systems: holding LB / RB fires the bottom / right button rapidly
     turbo_face: bool = False    # ...and the left / top face buttons too (PC Engine: they're free in 2-button mode)
+    states: bool = True         # save states work (FB Alpha 2012 CPS-3 never takes a saved state back)
+    warmup: int = 0             # frames a game must have run before it takes a saved state back (MAME 2003-Plus:
+                                # many games ignore one loaded during their start-up)
 
 
 # file name -> Core. N64 draws with the graphics card, so it stays with RetroArch for now.
@@ -34,9 +37,9 @@ CORES = {
     "pcsx_rearmed_libretro.so": Core("PCSX-ReARMed", ("Sony - PlayStation",), builtin=True),
     "stella_libretro.so": Core("Stella", ("Atari - 2600",), builtin=True),
     "fbneo_libretro.so": Core("FinalBurn Neo", ("FBNeo - Arcade Games",), builtin=True, arcade=True),
-    "mame2003_plus_libretro.so": Core("MAME 2003-Plus", ("MAME 2003-Plus",), builtin=True, arcade=True),
+    "mame2003_plus_libretro.so": Core("MAME 2003-Plus", ("MAME 2003-Plus",), builtin=True, arcade=True, warmup=1800),
     "mame2003_libretro.so": Core("MAME 2003 (0.78)", builtin=True, arcade=True),
-    "fbalpha2012_cps3_libretro.so": Core("FB Alpha 2012 CPS-3", builtin=True, arcade=True),
+    "fbalpha2012_cps3_libretro.so": Core("FB Alpha 2012 CPS-3", builtin=True, arcade=True, states=False),
     "snes9x_libretro.so": Core("Snes9x", builtin=True),     # Super Nintendo games with a DSP / ST01x chip (insertcoin/snes.py)
 }
 
@@ -86,3 +89,15 @@ def is_arcade(path, name=""):
     c = CORES.get(core_file(path))
     if c: return c.arcade
     return any(k in name for k in ("FinalBurn", "FB Alpha", "MAME"))
+
+
+def has_states(path):
+    """Whether the built-in player offers save states for this core (cores missing from the table: yes)."""
+    c = CORES.get(core_file(path))
+    return not c or c.states
+
+
+def state_warmup(path):
+    """How many frames a game must have run before a saved state is loaded into it (0 = straight away)."""
+    c = CORES.get(core_file(path))
+    return c.warmup if c else 0

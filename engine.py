@@ -8,7 +8,8 @@ plays its sound, feeds it the controllers and keeps its save files.
     engine.py CORE.so ROM [--title NAME] [--windowed] [--frames N --shot FILE.png]
 
 ROM may be a plain file, a zip, or RetroArch-style "archive.zip#file.nes".
-In a game: Select + Start (or Esc) pauses and opens a small menu: Resume / Controls / Quit game.
+In a game: Select + Start (or Esc) pauses and opens a small menu: Resume / Save state / Load state /
+Controls (arcade games) / Quit game. Save states: 4 slots per game, each with a picture and the date.
 Controls changes which button does what, for this game only (saved per game). The keyboard is
 also passed to the core, so e.g. Tab opens MAME's own menu in arcade games.
 
@@ -29,8 +30,8 @@ from pygame._sdl2 import audio as sdla
 
 if os.path.dirname(os.path.abspath(__file__)) not in sys.path:     # also when loaded with runpy (docs/make_screenshots.py)
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from paths import RA, APPDIR, SAVES, SYSTEM, CONFDIR
-from insertcoin.cores import has_face_turbo, has_turbo, is_arcade
+from paths import RA, APPDIR, SAVES, STATES, SYSTEM, CONFDIR
+from insertcoin.cores import has_face_turbo, has_states, has_turbo, is_arcade, state_warmup
 W, H = 1920, 1080
 
 def split_archive(path):
@@ -210,6 +211,8 @@ class Player:
         self.descs = {}; self.remap = {}; self.ctl_sel = 0; self.wait_until = 0; self.style = "keyboard"
         self.fno = 0; self.turbo = self.turbo_face = False; self.six_button = set(); self.press = press or []; self.bits = [0]; self.sticks = []
         self.keymap = None; self.title = title; self.keys = (); self.held_keys = set()
+        self.ran = 0; self.warming = False                     # frames the core has run; hidden start-up run (states)
+        self.slot_sel = 0; self.slot_action = "save"; self.confirm_sel = 1; self.slot_pics = {}
         fp = pygame.font.match_font("ubuntu,notosans,dejavusans", bold=True)
         self.font = lambda n, _c={}: _c.setdefault(n, pygame.font.Font(fp, n))
         self.av = AVInfo()                                    # some cores report their size while loading
@@ -230,6 +233,9 @@ class Player:
         L = self.lib
         L.retro_load_game.restype = C.c_bool
         L.retro_get_memory_data.restype = C.c_void_p; L.retro_get_memory_size.restype = C.c_size_t
+        L.retro_serialize_size.restype = C.c_size_t
+        L.retro_serialize.restype = L.retro_unserialize.restype = C.c_bool
+        L.retro_serialize.argtypes = L.retro_unserialize.argtypes = (C.c_void_p, C.c_size_t)
         # same order as RetroArch: environment first, then init, then the other callbacks (some cores need it)
         L.retro_set_environment(self.cbs[0])
         L.retro_init()
@@ -403,6 +409,76 @@ class Player:
         with open(tmp, "wb") as f: f.write(C.string_at(ptr, size))
         os.replace(tmp, self.sram_path())
 
+    # -- save states: the whole game at one moment, in numbered slots (and "continue", kept when quitting)
+    SLOTS = 4
+
+    def state_path(self, slot):
+        return f"{STATES}/{self.name}/{self.game_name}." + ("continue" if slot == "continue" else f"slot{slot}") + ".state"
+
+    def can_save_state(self):
+        return has_states(self.core_path) and self.lib.retro_serialize_size() > 0
+
+    def step(self):
+        """Run the core for one frame."""
+        self.lib.retro_run(); self.ran += 1
+
+    def warm_up(self):
+        """Some cores only take a state back once the game's start-up is over (MAME 2003-Plus): run the rest of it
+        quickly, without picture, sound or buttons, before the state is loaded."""
+        need = state_warmup(self.core_path) - self.ran
+        if need <= 0: return
+        log("INFO", f"Running the game's start-up first ({need} frames)")
+        if not self.probe and not self.shot:
+            self.screen.fill((0, 0, 0))
+            t = self.font(40).render("Loading\u2026", True, (230, 232, 240)); self.screen.blit(t, t.get_rect(center=(W // 2, H // 2)))
+            pygame.display.flip()
+        self.warming = True
+        try:
+            for k in range(need):
+                self.step()
+                if k % 60 == 0: pygame.event.pump()              # the window stays responsive
+        finally:
+            self.warming = False
+            if self.audio:
+                with self.audio.lock: self.audio.buf.clear()
+
+    def slot_time(self, slot):
+        """When the slot was saved (seconds since 1970), or None if it is empty."""
+        try: return os.path.getmtime(self.state_path(slot))
+        except OSError: return None
+
+    def save_state(self, slot):
+        """Write the game's state to a slot, with a small picture of the moment beside it. True if it worked."""
+        size = self.lib.retro_serialize_size()
+        if not size: log("WARN", "This core can't save states"); return False
+        buf = C.create_string_buffer(size)
+        if not self.lib.retro_serialize(buf, size): log("WARN", "The core could not save the state"); return False
+        p = self.state_path(slot); os.makedirs(os.path.dirname(p), exist_ok=True)
+        with open(p + ".tmp", "wb") as f: f.write(buf.raw)
+        os.replace(p + ".tmp", p)
+        if self.frame:                                       # the picture: the game screen, at most 480 wide
+            img = pygame.transform.rotate(self.frame, 90 * self.rotation) if self.rotation else self.frame
+            w, h = img.get_size(); g = self.av.geometry
+            aspect = g.aspect_ratio if g.aspect_ratio > 0 else w / h
+            if self.rotation % 2: aspect = 1 / aspect
+            pw = min(480, max(w, round(h * aspect))); ph = round(pw / aspect)
+            try: pygame.image.save(pygame.transform.scale(img, (pw, ph)), p[:-6] + ".png")
+            except Exception as e: log("WARN", f"No picture for the state: {e}")
+        log("INFO", f"State saved: {os.path.basename(p)} ({size:,} bytes)")
+        return True
+
+    def load_state(self, slot):
+        """Put the game back to a saved state. True if it worked; on failure the game goes on as it was."""
+        p = self.state_path(slot)
+        if not os.path.exists(p): return False
+        with open(p, "rb") as f: data = f.read()
+        self.warm_up()
+        buf = C.create_string_buffer(data, len(data))
+        if not self.lib.retro_unserialize(buf, len(data)):
+            log("WARN", f"The core could not load {os.path.basename(p)}"); return False
+        log("INFO", f"State loaded: {os.path.basename(p)}")
+        return True
+
     # -- per-game button layout ("Controls" in the pause menu)
     def remap_path(self): return f"{CONFDIR}/remaps/{self.name}/{self.game_name}.json"
 
@@ -485,16 +561,16 @@ class Player:
             th = H; tw = round(th * aspect)
             if tw > W: tw = W; th = round(W / aspect)
             self.screen.blit(pygame.transform.scale(img, (tw, th)), ((W - tw) // 2, (H - th) // 2))  # sharp pixels
-        self.draw_osd()
         if self.paused: self.draw_menu()
+        self.draw_osd()                                       # on top, so "Saved in slot 2" shows over the menu
         pygame.display.flip()
 
     # -- sound
     def sample(self, l, r):
-        if self.audio: self.audio.push(struct.pack("<hh", l, r))
+        if self.audio and not self.warming: self.audio.push(struct.pack("<hh", l, r))
 
     def batch(self, data, frames):
-        if self.audio and data: self.audio.push(C.string_at(data, frames * 4))
+        if self.audio and data and not self.warming: self.audio.push(C.string_at(data, frames * 4))
         return frames
 
     # -- controllers: port 1 = keyboard + first pad, port 2 = second pad ...
@@ -575,6 +651,7 @@ class Player:
                        for c, _ in self.pads]
 
     def state(self, port, device, index, id_):
+        if self.warming: return 0                             # the hidden start-up run before a state: no buttons
         device &= 0xFF
         if device == DEVICE_JOYPAD:
             bits = self.bits[port] if port < len(self.bits) else 0
@@ -593,7 +670,8 @@ class Player:
     @property
     def MENU(self):
         """Controls only for arcade games: home-console games have their own button settings in their menus."""
-        return ("Resume", "Controls", "Quit game") if is_arcade(self.core_path, self.name) else ("Resume", "Quit game")
+        return (("Resume", "Save state", "Load state") + (("Controls",) if is_arcade(self.core_path, self.name) else ())
+                + ("Quit game",))
 
     def core_message(self, text, seconds):
         """Shown on screen the way RetroArch does (e.g. the PC Engine core's '6-button mode selected')."""
@@ -641,15 +719,19 @@ class Player:
                 continue
             if e.type == pygame.KEYDOWN:
                 if e.key == pygame.K_ESCAPE:
-                    if self.paused and self.mode == "controls": self.mode = "pause"
+                    if self.paused and self.mode in ("controls", "slots", "confirm"): self.menu_key("back")
                     else: self.set_pause(not self.paused)
-                elif self.paused: self.menu_key({pygame.K_UP: "up", pygame.K_DOWN: "down", pygame.K_RETURN: "ok",
+                elif self.paused: self.menu_key({pygame.K_UP: "up", pygame.K_DOWN: "down", pygame.K_LEFT: "left",
+                                                 pygame.K_RIGHT: "right", pygame.K_RETURN: "ok",
                                                  pygame.K_KP_ENTER: "ok", pygame.K_BACKSPACE: "back"}.get(e.key))
             elif e.type == pygame.CONTROLLERBUTTONDOWN and self.paused:
                 self.menu_key({pygame.CONTROLLER_BUTTON_DPAD_UP: "up", pygame.CONTROLLER_BUTTON_DPAD_DOWN: "down",
+                               pygame.CONTROLLER_BUTTON_DPAD_LEFT: "left", pygame.CONTROLLER_BUTTON_DPAD_RIGHT: "right",
                                pygame.CONTROLLER_BUTTON_A: "ok", pygame.CONTROLLER_BUTTON_B: "back"}.get(e.button))
             elif e.type == pygame.CONTROLLERAXISMOTION and self.paused and e.axis == pygame.CONTROLLER_AXIS_LEFTY and abs(e.value) > 20000:
                 self.menu_key("up" if e.value < 0 else "down")
+            elif e.type == pygame.CONTROLLERAXISMOTION and self.paused and e.axis == pygame.CONTROLLER_AXIS_LEFTX and abs(e.value) > 20000:
+                self.menu_key("left" if e.value < 0 else "right")
         if self.paused and self.mode == "wait" and time.time() > self.wait_until: self.mode = "controls"
         # Select + Start together (on any pad) opens the menu; a second press closes it
         both = any(c.get_button(pygame.CONTROLLER_BUTTON_BACK) and c.get_button(pygame.CONTROLLER_BUTTON_START) for c, _ in self.pads)
@@ -664,6 +746,8 @@ class Player:
 
     def menu_key(self, k):
         if self.mode == "controls": return self.controls_key(k)
+        if self.mode == "slots": return self.slots_key(k)
+        if self.mode == "confirm": return self.confirm_key(k)
         if k == "up": self.menu_sel = (self.menu_sel - 1) % len(self.MENU)
         elif k == "down": self.menu_sel = (self.menu_sel + 1) % len(self.MENU)
         elif k == "back": self.set_pause(False)
@@ -671,7 +755,102 @@ class Player:
             item = self.MENU[self.menu_sel]
             if item == "Resume": self.set_pause(False)
             elif item == "Controls": self.mode = "controls"; self.ctl_sel = 0
+            elif item in ("Save state", "Load state"):
+                if not self.can_save_state():
+                    self.core_message("Save states aren't available for this game", 3); return
+                self.slot_action = "save" if item == "Save state" else "load"
+                self.mode = "slots"; self.slot_pics = {}
             else: log("INFO", "Quit chosen from the game menu"); self.running = False
+
+    # -- save / load state: 4 slots in a 2 x 2 grid
+    def slots_key(self, k):
+        s = self.slot_sel
+        if k in ("left", "right"): self.slot_sel = s ^ 1
+        elif k in ("up", "down"): self.slot_sel = s ^ 2
+        elif k == "back": self.mode = "pause"
+        elif k == "ok":
+            slot = s + 1
+            if self.slot_action == "load":
+                if self.slot_time(slot) is None: self.core_message(f"Slot {slot} is empty", 2); return
+                if self.load_state(slot):
+                    self.set_pause(False); self.core_message(f"Slot {slot} loaded", 2)
+                else: self.core_message(f"Slot {slot} could not be loaded", 3)
+            elif self.slot_time(slot) is not None: self.mode = "confirm"; self.confirm_sel = 1    # "No" first
+            else: self.save_to(slot)
+
+    def confirm_key(self, k):
+        if k in ("left", "right", "up", "down"): self.confirm_sel ^= 1
+        elif k == "back": self.mode = "slots"
+        elif k == "ok":
+            if self.confirm_sel == 0: self.save_to(self.slot_sel + 1)
+            else: self.mode = "slots"
+
+    def save_to(self, slot):
+        ok = self.save_state(slot)
+        self.slot_pics.pop(slot, None); self.mode = "pause"
+        self.core_message(f"Saved in slot {slot}" if ok else f"Slot {slot} could not be saved", 2 if ok else 3)
+
+    def slot_picture(self, slot, size):
+        """The slot's picture, fitted into size (cached while the slot screen is open)."""
+        if slot not in self.slot_pics:
+            img = None
+            try:
+                img = pygame.image.load(self.state_path(slot)[:-6] + ".png")
+                w, h = img.get_size(); f = min(size[0] / w, size[1] / h)
+                img = pygame.transform.smoothscale(img.convert(), (max(1, round(w * f)), max(1, round(h * f))))
+            except Exception: img = None
+            self.slot_pics[slot] = img
+        return self.slot_pics[slot]
+
+    def draw_slots(self):
+        dim = pygame.Surface((W, H), pygame.SRCALPHA); dim.fill((0, 0, 0, 190)); self.screen.blit(dim, (0, 0))
+        box = pygame.Rect(0, 0, 1040, 940); box.center = (W // 2, H // 2)
+        pygame.draw.rect(self.screen, (28, 30, 42), box, border_radius=28)
+        pygame.draw.rect(self.screen, (90, 95, 115), box, 3, border_radius=28)
+        title = "Save state" if self.slot_action == "save" else "Load state"
+        t = self.font(40).render(title, True, (255, 255, 255)); self.screen.blit(t, t.get_rect(midtop=(W // 2, box.top + 28)))
+        t = self.font(24).render(f"{self.title or self.game_name}"[:70], True, (160, 165, 185))
+        self.screen.blit(t, t.get_rect(midtop=(W // 2, box.top + 80)))
+        for i in range(self.SLOTS):
+            slot = i + 1; on = i == self.slot_sel
+            card = pygame.Rect(0, 0, 460, 360)
+            card.topleft = (box.left + 40 + (i % 2) * 500, box.top + 130 + (i // 2) * 390)
+            pygame.draw.rect(self.screen, (230, 232, 240) if on else (45, 48, 64), card, border_radius=20)
+            pic = pygame.Rect(card.left + 14, card.top + 14, card.width - 28, 260)
+            pygame.draw.rect(self.screen, (12, 12, 18), pic, border_radius=10)
+            when = self.slot_time(slot)
+            img = self.slot_picture(slot, pic.size) if when is not None else None
+            if img: self.screen.blit(img, img.get_rect(center=pic.center))
+            elif when is None:
+                t = self.font(28).render("Empty", True, (110, 114, 135)); self.screen.blit(t, t.get_rect(center=pic.center))
+            col = (20, 22, 30) if on else (230, 232, 240)
+            t = self.font(28).render(f"Slot {slot}", True, col); self.screen.blit(t, t.get_rect(topleft=(card.left + 20, pic.bottom + 14)))
+            if when is not None:
+                stamp = time.strftime("%d %b %Y  %H:%M", time.localtime(when)).lstrip("0")
+                t = self.font(24).render(stamp, True, col); self.screen.blit(t, t.get_rect(topright=(card.right - 20, pic.bottom + 18)))
+        ok, back = self.menu_buttons()
+        hint = f"{ok}  {'Save here' if self.slot_action == 'save' else 'Load'}   \u00b7   {back}  Back"
+        t = self.symfont(22).render(hint, True, (160, 165, 185)); self.screen.blit(t, t.get_rect(midbottom=(W // 2, box.bottom - 18)))
+        if self.mode == "confirm": self.draw_confirm()
+
+    def menu_buttons(self):
+        """The menu's OK and Back buttons as printed on the pad in use (SDL's A / B; Enter / Esc on the keyboard)."""
+        if self.style == "keyboard": return "Enter", "Esc"
+        return tuple(self.pad_label(next(r for r, b in self.button_pairs(self.style) if b == sb))
+                     for sb in (pygame.CONTROLLER_BUTTON_A, pygame.CONTROLLER_BUTTON_B))
+
+    def draw_confirm(self):
+        dim = pygame.Surface((W, H), pygame.SRCALPHA); dim.fill((0, 0, 0, 140)); self.screen.blit(dim, (0, 0))
+        box = pygame.Rect(0, 0, 640, 280); box.center = (W // 2, H // 2)
+        pygame.draw.rect(self.screen, (28, 30, 42), box, border_radius=28)
+        pygame.draw.rect(self.screen, (90, 95, 115), box, 3, border_radius=28)
+        t = self.font(32).render(f"Replace the state in slot {self.slot_sel + 1}?", True, (255, 255, 255))
+        self.screen.blit(t, t.get_rect(midtop=(W // 2, box.top + 50)))
+        for k, label in enumerate(("Replace", "Keep it")):
+            r = pygame.Rect(0, 0, 240, 72); r.center = (W // 2 + (k * 2 - 1) * 140, box.top + 190)
+            on = k == self.confirm_sel
+            pygame.draw.rect(self.screen, (230, 232, 240) if on else (55, 58, 75), r, border_radius=20)
+            t = self.font(30).render(label, True, (20, 22, 30) if on else (230, 232, 240)); self.screen.blit(t, t.get_rect(center=r.center))
 
     def controls_rows(self): return self.targets() + ["reset", "done"]
 
@@ -688,7 +867,9 @@ class Player:
             else: self.mode = "wait"; self.wait_until = time.time() + self.WAIT_S
 
     def draw_menu(self):
-        if getattr(self, "mode", "pause") != "pause": return self.draw_controls()
+        mode = getattr(self, "mode", "pause")
+        if mode in ("slots", "confirm"): return self.draw_slots()
+        if mode != "pause": return self.draw_controls()
         dim = pygame.Surface((W, H), pygame.SRCALPHA); dim.fill((0, 0, 0, 160)); self.screen.blit(dim, (0, 0))
         box = pygame.Rect(0, 0, 560, 150 + 96 * len(self.MENU)); box.center = (W // 2, H // 2)
         pygame.draw.rect(self.screen, (28, 30, 42), box, border_radius=28)
@@ -758,10 +939,10 @@ class Player:
                     self.present(); self.clock.tick(60); continue
                 if self.audio:                               # run the core just fast enough to keep the sound fed
                     while self.running and self.audio.queued() < self.audio.target and ran < 4:
-                        self.lib.retro_run(); ran += 1
+                        self.step(); ran += 1
                         if self.frames_left is not None and frames + ran >= self.frames_left: break   # --frames: exact
                 else:
-                    self.lib.retro_run(); ran = 1
+                    self.step(); ran = 1
                 frames += ran
                 if self.probe:                               # no picture, no waiting: just look now and then
                     if frames % 30 == 0: self.look()

@@ -4,6 +4,7 @@ Every other module imports these names instead of building its own paths.
 Tests point them elsewhere with environment variables:
   INSERT_COIN_CONFIG  settings, controllers, remaps, browser playlists, played.json
   INSERT_COIN_SAVES   the built-in player's saves
+  INSERT_COIN_STATES  the built-in player's save states
   INSERT_COIN_SYSTEM  the BIOS folder (test starts use a copy, so a core can't change the real one)
   XDG_STATE_HOME      where the logs go (standard XDG variable)
 """
@@ -16,6 +17,7 @@ CACHE = f"{HOME}/.cache/insert-coin"                                  # year/pub
 LOGDIR = f"{os.environ.get('XDG_STATE_HOME') or HOME + '/.local/state'}/insert-coin"
 CONFDIR = os.environ.get("INSERT_COIN_CONFIG") or f"{HOME}/.config/insert-coin"
 SAVES = os.environ.get("INSERT_COIN_SAVES") or f"{APPDIR}/saves"
+STATES = os.environ.get("INSERT_COIN_STATES") or f"{APPDIR}/states"   # save states: <core>/<game>.slotN.state + .png
 LIBRARY = f"{APPDIR}/library.json"                                    # Insert Coin's own game library (B menu: Library)
 FAVORITES = f"{APPDIR}/favorites.json"                                # ...its Favorites
 HISTORY = f"{APPDIR}/history.json"                                    # ...and Recently Played

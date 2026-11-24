@@ -133,7 +133,8 @@ def main():
     for k, (pl, (name, maker, colour, _)) in enumerate(SYSTEMS.items()):   # friendly names + order for the demo systems
         m["FRIENDLY"][pl] = (name, maker, colour); m["ORDER"][pl] = k
     app = m["App"](shot=OUT); app.running = True
-    time.strftime = lambda fmt, *a: "20:15"               # a fixed clock, so re-renders don't differ
+    real_strftime = time.strftime                          # a fixed clock, so re-renders don't differ
+    time.strftime = lambda fmt, *a: real_strftime(fmt, *a) if a else "20:15"   # (dates of given times stay)
     os.makedirs(OUT, exist_ok=True)
 
     def save(name):
@@ -175,6 +176,17 @@ def main():
     app.screen.fill((0, 0, 0)); app.screen.blit(g, ((W - g.get_width()) // 2, 0)); p.draw_menu()
     pygame.image.save(pygame.transform.smoothscale(app.screen, SIZE), os.path.join(OUT, "game_controls.png"))
     print("wrote", os.path.join("docs", "screenshots", "game_controls.png"))
+    # ... and its Save state screen: three used slots (made-up moments, fixed dates) and an empty one
+    _, snap2, title2 = draw_art(pygame, lambda n: pygame.font.Font(fp, n), "Star Pilot X", root)
+    p.name = "Demo"; p.slot_pics = {}; p.slot_sel = 1; p.slot_action = "save"; p.mode = "slots"
+    for slot, img, when in ((1, title2, (2026, 3, 14, 18, 5)), (2, snap2, (2026, 3, 15, 20, 41)),
+                            (3, pygame.transform.flip(snap2, True, False), (2026, 3, 16, 9, 12))):
+        sp = p.state_path(slot); os.makedirs(os.path.dirname(sp), exist_ok=True)
+        open(sp, "wb").close(); pygame.image.save(pygame.transform.scale(img, (480, 360)), sp[:-6] + ".png")
+        t = time.mktime(when + (0, 0, 0, -1)); os.utime(sp, (t, t))
+    app.screen.fill((0, 0, 0)); app.screen.blit(g, ((W - g.get_width()) // 2, 0)); p.draw_menu()
+    pygame.image.save(pygame.transform.smoothscale(app.screen, SIZE), os.path.join(OUT, "game_states.png"))
+    print("wrote", os.path.join("docs", "screenshots", "game_states.png"))
     app.raw[1] = None
     app.start_setup(1, name="USB Gamepad", guid="demo", baseline={})
     app.setup["step"] = 4; save("controller_setup")
