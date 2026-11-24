@@ -4,6 +4,26 @@ All notable changes to Insert Coin. Versions follow [semantic versioning](https:
 before 1.0, minor versions add features and patch versions fix bugs.
 Each version is also a [GitHub Release](https://github.com/Madmartigan1/insert-coin/releases).
 
+## [0.7.0] — 2026-11-24 · "Continue?"
+
+### Added
+- **Save states in the built-in player.** Select + Start → **Save state** keeps the whole game at
+  that moment in one of 4 slots per game, each shown with a picture and the date; saving over a
+  used slot asks first. **Load state** puts the game back to that moment. States are kept in
+  `~/.local/share/insert-coin/states/`.
+- **Continue where you left off.** Quitting a game after at least 10 seconds of play keeps a
+  Continue point; the next time you start it, Insert Coin asks **Continue** (with a picture of
+  where you were) or **Start over**.
+- **Picture look per system.** Select + Start → **Picture** switches between **Sharp**,
+  **Smoothed** and **Scanlines**, live behind the menu; the choice is kept for every game of
+  that system.
+
+### Notes
+- Some MAME 2003-Plus games only take a state back once their start-up is over, so loading one
+  early in a game first runs the start-up out of sight (a second or two, with *Loading…*). A few
+  arcade games still don't take a state back. CPS-3 games (FB Alpha 2012) have no save states.
+- Games played in RetroArch keep RetroArch's own save states.
+
 ## [0.6.2] — 2026-11-23
 
 ### Changed
