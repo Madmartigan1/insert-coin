@@ -4,6 +4,34 @@ All notable changes to Insert Coin. Versions follow [semantic versioning](https:
 before 1.0, minor versions add features and patch versions fix bugs.
 Each version is also a [GitHub Release](https://github.com/Madmartigan1/insert-coin/releases).
 
+## [0.8.2] — 2026-11-25
+
+### Added
+- **Insert Coin's own game databases.** `insert-coin --databases` downloads the libretro game
+  databases (which game a file is, its year and publisher) into Insert Coin's own folder. RetroArch's
+  databases are still read first when they're there, so no name, year or publisher changes; the new
+  copy only fills the gaps.
+- **No RetroArch needed.** On a computer without RetroArch, Insert Coin starts with its own (empty)
+  library and plays every game in the built-in player with its own cores, and never writes into
+  RetroArch's folders. `insert-coin --scan --add FOLDER` builds the library from your game folders:
+  console games the databases recognise by checksum go straight in; the rest are test-started first.
+- `--scan` and `--scan --add` take one or more folders to look through.
+- **Favorites from the search screen.** In the results list beside the keyboard, **Y** adds or removes
+  the chosen game, and a star marks your favorites.
+
+### Changed
+- `--scan --add` places a `.bin` file (loose, or alone in a zip) by the games beside it, test-starts
+  arcade zips no database names (added under their set name if they start), and tries more cores:
+  Snes9x for Super Nintendo games Mesen-S can't start, and FB Alpha 2012 CPS-3 last for arcade sets.
+  A game that started stays tested when a core is added later in the list.
+
+### Fixed
+- `--scan --add` no longer adds arcade sets that FinalBurn Neo doesn't know: for those it shows its own
+  "Romset is unknown" screen, which counted as a game. Games added that way by earlier runs are tested
+  again and taken out of Insert Coin's library (their files stay where they are).
+- The built-in player opens zips that Python's zip reader refuses ("Corrupt extra field", written by
+  some old zip tools), using 7-Zip; such games used to open in RetroArch instead.
+
 ## [0.8.1] — 2026-11-24
 
 ### Fixed
