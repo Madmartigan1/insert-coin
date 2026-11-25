@@ -96,10 +96,31 @@ class Scan(unittest.TestCase):
         self.assertEqual([x["name"] for x in r["systems"]["Nintendo - Game Boy"]["not_games"]],
                          ["[BIOS] Byte Console Boot ROM (World).gb"])
         self.assertEqual(r["systems"]["Nintendo - Game Boy"]["by_type"], [])
-        self.assertEqual([os.path.relpath(u["path"], ROOT) for u in r["unknown"]], ["arcade/nosuch.zip"])
+        self.assertEqual(r["unknown"], [])
+        self.assertEqual(self.paths(r, "MAME 2003-Plus", "by_type"), ["arcade/nosuch.zip"])     # a set nobody names: tried
         self.assertEqual([os.path.relpath(u["path"], ROOT) for u in r["unreadable"]], ["broken/Wave (USA).zip"])
         self.assertNotIn("notes/README.md", str(r))                                                   # text, not a game
         self.assertEqual(S.read(scanner.REPORT)["systems"][NES]["listed"], 1)
+
+    def test_from_scratch_a_folder_goes_by_the_games_it_recognises(self):
+        """No library yet: an unknown .bin is placed by the games recognised beside it (Mega Drive here)."""
+        put("md2/Turbo Tanks (USA).bin", PLAIN)                                        # recognised Mega Drive game
+        hack = put("md2/Turbo Tanks (Hack).bin", PLAIN + b"hack")                       # unknown, beside it
+        lone = put("lone/Mystery.bin", b"mystery" * 50)                                 # nothing recognised beside it
+        zipped = make_zip("md2/Turbo Tanks (Beta).zip", {"Turbo Tanks (Beta).bin": PLAIN + b"beta"})   # one .bin, zipped
+        r = scanner.scan(roots=[ROOT], dbs=self.dbs, listed=[])
+        self.assertIn(hack, [x["path"] for x in r["systems"][MD]["by_type"]])
+        self.assertIn(zipped + "#Turbo Tanks (Beta).bin", [x["path"] for x in r["systems"][MD]["by_type"]])
+        self.assertIn(f"{ROOT}/arcade/nosuch.zip", [x["path"] for x in r["systems"]["MAME 2003-Plus"]["by_type"]])
+        self.assertIn(lone, [u["path"] for u in r["unknown"]])
+        with_library = self.run_scan()                                                   # a listed folder: as before
+        self.assertIn(f"{ROOT}/md/0001 Byte Rally.bin", [x["path"] for x in with_library["systems"][MD]["by_type"]])
+
+    def test_a_lone_bin_in_an_arcade_folder_stays_an_arcade_set(self):
+        """A one-file zip nobody names, among arcade sets (and one console game): still an arcade set."""
+        make_zip("arcade/Comet Run (J).zip", {"Comet Run (J).nes": COMET})              # a console game there too
+        r = scanner.scan(roots=[ROOT], dbs=self.dbs, listed=[])
+        self.assertIn(f"{ROOT}/arcade/nosuch.zip", [x["path"] for x in r["systems"]["MAME 2003-Plus"]["by_type"]])
 
     def test_changes_nothing_else(self):
         before = {p: os.path.getmtime(p) for p in (f"{S.RA}/playlists/{NES}.lpl", self.listed)}

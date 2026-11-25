@@ -11,6 +11,10 @@ FBNeo is a special case: it "starts" an arcade set with files missing and shows 
 set it says files are required for fails too. Games added by an earlier run are tested again when these rules
 change, and taken out of the library again if they now fail (their files stay where they are).
 
+A library built from scratch (no games in it yet, e.g. on a computer without RetroArch) takes the console games
+the databases recognise by their checksum straight in, without a test start: they are known, good dumps. Arcade
+sets (a set may lack files) and games known only by their file type are still test-started.
+
 Games that fail are never deleted: they are listed, with the reason, in scan-not-added.json. Games whose core
 the built-in player can't run are listed there as "not tested" (none since 0.8, when N64 joined). Results are kept by file
 size and time (and the cores tried), so running it again only tests what is new or changed. With retry, the
@@ -18,12 +22,12 @@ games left out for a black screen are started again, up to RETRY_STARTS times ea
 shows something."""
 import os, shutil, subprocess, sys, tempfile, time
 from concurrent.futures import ThreadPoolExecutor
-from paths import APPDIR, CACHE, HERE, LIBRARY, RA, SYSTEM
+from paths import APPDIR, CACHE, CORES_DIR, HERE, LIBRARY, RA, SYSTEM
 from insertcoin.coreinstall import own_core
 from insertcoin.cores import DEFAULT_CORE, core_file, is_builtin
 from insertcoin.logs import log
 from insertcoin.names import split_archive
-from insertcoin.ownlib import import_retroarch, save
+from insertcoin.ownlib import import_retroarch, new_library, save
 from insertcoin.retroarch import read_json
 
 VERSION = 1
@@ -35,11 +39,14 @@ PRESSES = ("start@300-306", "a@900-906", "b@1500-1506", "start@2100-2106", "a@27
 TIMEOUT = 180                                                           # seconds of real time for one test start
 RETRY_STARTS = 6                                                        # starts per core for a black-screen game, with retry
 # arcade sets: the playlist's own core first, then the other arcade cores (a set may only run in one of them)
-ARCADE_CORES = {"MAME 2003-Plus": ("mame2003_plus_libretro.so", "mame2003_libretro.so", "fbneo_libretro.so"),
-                "FBNeo - Arcade Games": ("fbneo_libretro.so", "mame2003_plus_libretro.so", "mame2003_libretro.so")}
+ARCADE_CORES = {"MAME 2003-Plus": ("mame2003_plus_libretro.so", "mame2003_libretro.so", "fbneo_libretro.so",
+                                   "fbalpha2012_cps3_libretro.so"),
+                "FBNeo - Arcade Games": ("fbneo_libretro.so", "mame2003_plus_libretro.so", "mame2003_libretro.so",
+                                         "fbalpha2012_cps3_libretro.so")}   # CPS-3: older CPS-3 sets FBNeo can't load
 # consoles: a second core tried when the playlist's own can't start a game (BlastEm can't read interleaved .smd
-# files; PicoDrive can, and plays Mega Drive games too)
-SECOND_CORES = {"Sega - Mega Drive - Genesis": ("picodrive_libretro.so",)}
+# files; PicoDrive can, and plays Mega Drive games too; some Super Nintendo betas start only in Snes9x)
+SECOND_CORES = {"Sega - Mega Drive - Genesis": ("picodrive_libretro.so",),
+                "Nintendo - Super Nintendo Entertainment System": ("snes9x_libretro.so",)}
 
 
 def candidates(report):
@@ -54,12 +61,63 @@ def candidates(report):
     return out
 
 
+def core_folder(f=None):
+    """Where cores are looked for: RetroArch's folder where it has the core (or any, with no file named), else
+    Insert Coin's own (a computer without RetroArch)."""
+    ra = f"{RA}/cores"
+    return ra if (os.path.exists(f"{ra}/{f}") if f else os.path.isdir(ra)) else CORES_DIR
+
+
 def cores_to_try(system, defaults):
     """The cores a game of this playlist is tried with, in order: full paths."""
-    d = defaults.get(system) or (f"{RA}/cores/{DEFAULT_CORE[system]}" if system in DEFAULT_CORE else None)
+    d = defaults.get(system) or (f"{core_folder(DEFAULT_CORE[system])}/{DEFAULT_CORE[system]}" if system in DEFAULT_CORE else None)
     files = ARCADE_CORES.get(system) or (((core_file(d),) if d else ()) + SECOND_CORES.get(system, ()))
-    folder = os.path.dirname(d) if d else f"{RA}/cores"
-    return [f"{folder}/{f}" for f in files]
+    folder = os.path.dirname(d) if d else core_folder()
+    return [f"{folder}/{f}" if os.path.exists(f"{folder}/{f}") or not d else f"{core_folder(f)}/{f}" for f in files]
+
+
+def same_tries(result, now):
+    """Is a test result still good for the cores tried now? The same list, or (for a game that started) the same
+    cores up to the one that started it, so a core added at the end doesn't test every game again."""
+    if result.get("tries") == now: return True
+    core, before = result.get("core"), result.get("tries") or []
+    if not result.get("passed") or core not in now or core not in before: return False
+    i = now.index(core)
+    return before[:i + 1] == now[:i + 1]
+
+
+FBNEO = "fbneo_libretro.so"
+_fbneo_sets = None
+
+
+def fbneo_sets():
+    """The set names FBNeo's database knows (RetroArch's copy and Insert Coin's). FBNeo loads a set only by a name it
+    knows; for any other it draws its own 'Romset is unknown' screen, which a test start would take for a game."""
+    global _fbneo_sets
+    if _fbneo_sets is None:
+        from insertcoin.databases import rdb_paths
+        from insertcoin.meta import _rdb_load
+        _fbneo_sets = {(r.get("rom_name") or "").lower()[:-4] for p in rdb_paths("FBNeo - Arcade Games")
+                       for r in _rdb_load(p) if (r.get("rom_name") or "").lower().endswith(".zip")}
+    return _fbneo_sets
+
+
+def fbneo_unknown(path):
+    """An arcade zip whose set name FBNeo doesn't know (only when its database is there to ask)."""
+    archive, inner = split_archive(path)
+    if inner or not archive.lower().endswith(".zip"): return False
+    known = fbneo_sets()
+    return bool(known) and os.path.splitext(os.path.basename(archive))[0].lower() not in known
+
+
+def false_pass(result, path):
+    """A start that 'passed' on FBNeo's own error screen (a set FBNeo doesn't know): to be tested again."""
+    return bool(result.get("passed") and core_file(result.get("core") or "") == FBNEO and fbneo_unknown(path))
+
+
+def recognised(report):
+    """Console games the databases know by their checksum (not arcade sets): paths."""
+    return {x["path"] for sy, s in report["systems"].items() if sy not in ARCADE_CORES for x in s["new"] if x.get("name")}
 
 
 def test_start(core, rom, env):
@@ -96,10 +154,13 @@ def add_found(report, starter=test_start, workers=None, progress=None, retry=Fal
     games left out earlier for a black screen get up to RETRY_STARTS starts per core.
     Returns a summary: {"added": {system: n}, "not_added": [...], "tested": n, "retried": n, "backup": path or None}."""
     t0 = time.time()
-    if not os.path.exists(LIBRARY): import_retroarch()
+    if not os.path.exists(LIBRARY):
+        import_retroarch() if os.path.isdir(f"{RA}/playlists") else new_library()
     doc = read_json(LIBRARY)
     if not isinstance(doc, dict) or not isinstance(doc.get("systems"), list):
         raise ValueError(f"{LIBRARY} couldn't be read: nothing was added")
+    # a library built from scratch: recognised console games go straight in (see the top of this file)
+    trusted = recognised(report) if not any(s.get("games") for s in doc["systems"]) else set()
     defaults = {s["name"]: s.get("default_core") for s in doc["systems"]}
     have = {g["path"] for s in doc["systems"] for g in s.get("games", [])}
     todo = [c for c in candidates(report) if c[1] not in have]
@@ -113,7 +174,8 @@ def add_found(report, starter=test_start, workers=None, progress=None, retry=Fal
 
     def still_good(sy, path):                       # tested before: same file, same cores, same rules
         k = known.get(path)
-        return k and k.get("file") == stamp(path) and k.get("tries") == cores_to_try(sy, defaults) and k.get("rules") == RULES
+        return (k and k.get("file") == stamp(path) and same_tries(k, cores_to_try(sy, defaults)) and k.get("rules") == RULES
+                and not false_pass(k, path))
     def was_black(k):                                # left out because a core showed only a black screen
         return not k["passed"] and (k.get("black") or k.get("why", "").startswith("black"))
     results, jobs, retried = {}, [], set()
@@ -124,7 +186,7 @@ def add_found(report, starter=test_start, workers=None, progress=None, retry=Fal
             if retry and still_good(sy, path): retried.add(path)
     def judged_now(path):                            # added by an earlier run: tested again only if the file or rules changed
         k = known.get(path)
-        return k and k.get("file") == stamp(path) and k.get("rules") == RULES
+        return k and k.get("file") == stamp(path) and k.get("rules") == RULES and not false_pass(k, path)
     recheck = [g for g in earlier if not judged_now(g[1])]
     jobs += recheck
 
@@ -132,6 +194,9 @@ def add_found(report, starter=test_start, workers=None, progress=None, retry=Fal
     def run(job):
         sy, path, label = job
         tries = cores_to_try(sy, defaults)
+        if path in trusted and tries:
+            return path, {"file": stamp(path), "tries": tries, "rules": RULES, "passed": True, "core": tries[0],
+                          "why": "recognised by its checksum (not test-started)", "trusted": True}
         if not tries or not is_builtin(tries[0]):
             return path, {"file": stamp(path), "tries": tries, "rules": RULES, "passed": False, "core": tries[0] if tries else None,
                           "why": "not tested: the built-in player can't run this system's core yet"}
@@ -139,6 +204,8 @@ def add_found(report, starter=test_start, workers=None, progress=None, retry=Fal
         starts = RETRY_STARTS if path in retried else 2       # some cores start with random memory: black isn't final
         for core in tries:
             if not os.path.exists(own_core(core)): why = f"core not installed: {core_file(core)}"; continue
+            if core_file(core) == FBNEO and fbneo_unknown(path):
+                why = "not a set FBNeo knows"; tried.append("fbneo"); first = first or why; continue
             ok, why = starter(own_core(core), path, env)
             for _ in range(starts - 1):
                 if ok or not why.startswith("black"): break
@@ -193,14 +260,18 @@ def add_found(report, starter=test_start, workers=None, progress=None, retry=Fal
     log.info("Scan: tested %d new games (%d now, %.0f s); added %d; taken out %d; not added %d%s", len(todo), len(jobs),
              time.time() - t0, sum(added.values()), sum(taken_out.values()), len(not_added),
              f"; backup {backup}" if backup else "")
-    return {"added": added, "taken_out": taken_out, "not_added": not_added, "tested": len(todo) + len(recheck),
-            "started_now": len(jobs), "retried": len(retried), "backup": backup}
+    trusted_n = sum(1 for _, p, _ in todo if results[p].get("trusted"))
+    return {"added": added, "taken_out": taken_out, "not_added": not_added, "tested": len(todo) + len(recheck) - trusted_n,
+            "started_now": len([j for j in jobs if j[1] not in trusted]), "retried": len(retried), "backup": backup,
+            "recognised": trusted_n}
 
 
 def summary(result):
     from insertcoin.systems import FRIENDLY
     name = lambda sy: FRIENDLY.get(sy, (sy,))[0]
     lines = [f"Test-started {result['tested']:,} games ({result['started_now']:,} now, the rest from earlier runs)."]
+    if result.get("recognised"):
+        lines.append(f"{result['recognised']:,} console games recognised by their checksum went straight in (a new library).")
     if result.get("retried"):
         lines.append(f"{result['retried']:,} of them had shown a black screen before and got up to {RETRY_STARTS} starts each.")
     if result["added"]:
@@ -218,5 +289,5 @@ def summary(result):
     if result["not_added"]:
         lines += ["", f"Not added: {len(result['not_added']):,} (" + ", ".join(f"{w}: {n}" for w, n in sorted(why.items())) + ")",
                   f"Their list, with the reasons: {NOT_ADDED}"]
-    lines.append("RetroArch's playlists were not changed.")
+    if os.path.isdir(f"{RA}/playlists"): lines.append("RetroArch's playlists were not changed.")
     return "\n".join(lines)

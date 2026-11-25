@@ -10,7 +10,7 @@ time. Until RetroArch is no longer needed the two are kept in step both ways: wi
 change is also written to RetroArch's lists, and with "Library: RetroArch" to Insert Coin's (once they exist), so
 either library shows the same favorites and games."""
 import json, os, time
-from paths import FAVORITES, HISTORY, LIBRARY
+from paths import CORES_DIR, FAVORITES, HISTORY, LIBRARY, RA
 from insertcoin.logs import log
 from insertcoin.names import split_archive
 from insertcoin.retroarch import Entry, RetroArch, read_json
@@ -23,6 +23,21 @@ def raw_entry(it, playlist_db):
     c = it.get("core_path") or ""
     return {"label": it.get("label") or os.path.splitext(os.path.basename(split_archive(it["path"])[0]))[0],
             "path": it["path"], "core": c if c not in ("", "DETECT") else None, "db": it.get("db_name") or playlist_db}
+
+
+def installed_core(path):
+    """The core to use for a stored core path: that file if it is there, else Insert Coin's own copy of the same core
+    (a library made where RetroArch was, used where it isn't), else None."""
+    if not path: return None
+    if os.path.exists(path): return path
+    mine = f"{CORES_DIR}/{os.path.basename(path)}"
+    return mine if os.path.exists(mine) else None
+
+
+def new_library():
+    """An empty library.json, for a computer without RetroArch's playlists to start from."""
+    save(LIBRARY, {"version": VERSION, "created": round(time.time()), "systems": []})
+    log.info("Library: started an empty library in %s", LIBRARY)
 
 
 def save(path, doc):
@@ -90,17 +105,16 @@ class OwnLibrary:
         if not isinstance(self.doc, dict) or self.doc.get("version") != VERSION or not isinstance(self.doc.get("systems"), list):
             raise LibraryError(f"{LIBRARY} is missing or can't be read")
         for sy in self.doc["systems"]:                              # each playlist's default core, for the lists below
-            dc = sy.get("default_core"); self.ra.defaults[sy["name"] + ".lpl"] = dc if dc and os.path.exists(dc) else None
+            self.ra.defaults[sy["name"] + ".lpl"] = installed_core(sy.get("default_core"))
         self.favorites(); self.history()                            # copied from RetroArch's the first time; must be readable
 
     def playlists(self):
         """[(name, [Entry, ...])], as RetroArch.playlists() gives them: an entry's own core only if installed."""
         out = []
         for s in self.doc["systems"]:
-            dc = s.get("default_core")
-            default = dc if dc and os.path.exists(dc) else None
+            default = installed_core(s.get("default_core"))
             self.ra.defaults[s["name"] + ".lpl"] = default             # favorites and history use them too
-            out.append((s["name"], [Entry(g["label"], g["path"], g["core"] if g.get("core") and os.path.exists(g["core"]) else default,
+            out.append((s["name"], [Entry(g["label"], g["path"], installed_core(g.get("core")) or default,
                                           g["db"]) for g in s["games"]]))
         return out
 
@@ -117,12 +131,14 @@ class OwnLibrary:
         out = []
         for g in items:
             if not g.get("path") or not os.path.exists(split_archive(g["path"])[0]): continue
-            c = g.get("core")
-            out.append(Entry(g["label"], g["path"], c if c and os.path.exists(c) else self.ra.defaults.get(g.get("db") or ""), g.get("db") or ""))
+            out.append(Entry(g["label"], g["path"], installed_core(g.get("core")) or self.ra.defaults.get(g.get("db") or ""),
+                             g.get("db") or ""))
         return out
 
     def _mirror(self, what, fn):
-        """Write a change to RetroArch's list too; Insert Coin's own list already has it if this fails."""
+        """Write a change to RetroArch's list too; Insert Coin's own list already has it if this fails. Nothing is
+        written where RetroArch isn't installed."""
+        if not os.path.isdir(RA): return
         try: fn()
         except Exception as e: log.warning("Could not update RetroArch's %s: %s", what, e)
 
@@ -198,7 +214,8 @@ def open_source(kind):
     note = None
     try:
         if not os.path.exists(LIBRARY):
-            import_retroarch(); note = "imported"
+            if os.path.isdir(RetroArch.PLAYLISTS): import_retroarch(); note = "imported"
+            else: new_library()                                    # no RetroArch: games come from a scan (--scan --add)
         return "insertcoin", OwnLibrary(), note
     except Exception as e:
         log.warning("Insert Coin's own library can't be used (%s): using RetroArch's playlists", e)

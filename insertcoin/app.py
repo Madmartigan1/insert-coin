@@ -9,7 +9,7 @@ from insertcoin.ownlib import open_source
 from insertcoin.cores import not_builtin_systems
 from insertcoin.meta import Meta
 from insertcoin.media import Fonts, Images, Sounds
-from insertcoin.settings import load_settings, save_settings
+from insertcoin.settings import load_settings, retroarch_installed, save_settings
 from insertcoin.draw import H, W
 from insertcoin.launch import Launcher
 from insertcoin.pads import Pads
@@ -179,6 +179,9 @@ class App(Pads, Launcher, Screens):
         return f"Library: Insert Coin (beta) - {count}" + (" (imported from RetroArch)" if self.lib_note else "")
 
     def toggle_engine(self):
+        if not retroarch_installed():                               # nothing to switch to
+            self.settings["engine"] = True; self.sfx.play("back")
+            self.say("RetroArch isn't installed: every game runs in the built-in player", 3.0); return
         self.settings["engine"] = not self.settings.get("engine")
         try: save_settings(self.settings)
         except Exception as e: self.say(f"Could not save the setting: {e}")
@@ -415,7 +418,8 @@ With no option it opens Insert Coin (full screen).
 
 Options:
   --windowed             open it in a window instead
-  --scan                 look through your game folders and report games not listed yet (changes nothing)
+  --scan [FOLDER]        look through your game folders and report games not listed yet (changes nothing);
+                         name the folder that holds your games when the library has none yet
   --scan --add           test-start the games found and add those that start to Insert Coin's library
   --scan --add --retry   the same, giving games left out for a black screen more starts
   --cores                copy the built-in player's emulator cores into Insert Coin's own folder
@@ -435,7 +439,10 @@ def check_options(a):
     if "--help" in a or "-h" in a: return USAGE.format(version=__version__), 0
     rest = a[:a.index("--shot")] + a[a.index("--shot") + 2:] if "--shot" in a else a
     if "--shot" in a and len(a) <= a.index("--shot") + 1: return "insert-coin: --shot needs a folder\nTry: insert-coin --help", 2
-    unknown = [o for o in rest if o not in OPTIONS]
+    folders = [o for o in rest if not o.startswith("-")] if "--scan" in rest else []
+    missing = [f for f in folders if not os.path.isdir(os.path.expanduser(f))]
+    if missing: return f"insert-coin: no such folder: {missing[0]}\nTry: insert-coin --help", 2
+    unknown = [o for o in rest if o not in OPTIONS and o not in folders]
     if unknown: return f"insert-coin: unknown option {unknown[0]}\nTry: insert-coin --help", 2
     if ("--add" in a or "--retry" in a) and "--scan" not in a:
         return "insert-coin: --add and --retry go with --scan (insert-coin --scan --add)\nTry: insert-coin --help", 2
@@ -515,10 +522,14 @@ def main():
         line.clear(); print(coreinstall.summary(results))
         return
     if "--scan" in a:                    # report what a scan finds (changes nothing); with --add, test-start and add them
-        from insertcoin.scanner import scan, summary
+        from insertcoin.scanner import default_roots, listed_games, scan, summary
+        folders = [os.path.abspath(os.path.expanduser(o)) for o in a if not o.startswith("-")]
+        if not folders and not default_roots([p for _, p in listed_games()]):
+            print("Your library has no games yet, so Insert Coin doesn't know where to look. Name the folder that holds\n"
+                  "your games, for example:  insert-coin --scan --add ~/Games"); raise SystemExit(2)
         print("Scanning your game folders (the first scan reads every archive's index; later ones only what changed)...")
         line = Progress()
-        report = scan(progress=lambda n: line.show(f"  {n:,} files..."))
+        report = scan(roots=folders or None, progress=lambda n: line.show(f"  {n:,} files..."))
         line.clear(); print(summary(report))
         if "--add" in a:
             from insertcoin import adding

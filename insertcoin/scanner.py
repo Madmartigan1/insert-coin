@@ -7,7 +7,9 @@ set ("gaiden.zip"), recognised by that name. What the scan finds is compared wit
   listed     already in the library
   copy       the same game as one already listed (same checksum, or the same arcade set) - never added twice
   new        recognised, not listed yet
-  by_type    not in the database, but its file type says which system it is for (translations, hacks...)
+  by_type    not in the database, but its file type says which system it is for (translations, hacks...);
+             also arcade zips whose set name no database knows (old set names, split clones): they go to the
+             MAME 2003-Plus list under their set name if a test start works
   not_games  BIOS files and enhancement-chip dumps: in the databases, but not games
   unknown    a ROM-like file that couldn't be placed, or an archive that couldn't be read
 
@@ -63,6 +65,7 @@ def second_checksum(ext, data):
 ARCADE = (("MAME 2003-Plus", "MAME 2003-Plus"), ("FBNeo - Arcade Games", "FBNeo - Arcade Games"),
           ("MAME 2003", "MAME 2003-Plus"))
 ARCADE_PLAYLISTS = {pl for _, pl in ARCADE}
+UNKNOWN_SETS = "MAME 2003-Plus"                 # where arcade sets no database names go (by their set name), if they start
 
 
 NOT_A_GAME = re.compile(r"\bBIOS\b|\(Enhancement Chip\)", re.I)
@@ -204,8 +207,14 @@ def scan(roots=None, dbs=None, listed=None, progress=None):
             set_name = os.path.splitext(os.path.basename(p))[0].lower()
             roms = [(m, (crc, alt)) for m, crc, alt in c["members"] if os.path.splitext(m)[1].lower() in EXT_SYSTEM]
             console = any(EXT_SYSTEM[os.path.splitext(m)[1].lower()] or crcs[0] in by_crc for m, crcs in roms)
-            # an arcade set: listed as one, or a zip with no console ROM in it (arcade chips are often .bin files)
-            if p.lower().endswith(".zip") and (p in listed_arcade or not console):
+            # an arcade set: listed as one, or a zip with no console ROM in it (arcade chips are often .bin files).
+            # A zip holding just one file of a type several systems use (a Mega Drive .bin) whose name is no arcade
+            # set is decided below, by what else is in its folder ("lone")
+            lone = (len(c["members"]) == 1 and len(roms) == 1 and EXT_SYSTEM[os.path.splitext(roms[0][0])[1].lower()] is None
+                    and set_name not in sets and p not in listed_arcade)
+            if lone and not console:
+                found.append((p, "lone", roms[0]))
+            elif p.lower().endswith(".zip") and (p in listed_arcade or not console):
                 found.append((p, "arcade", None))                       # an arcade set (its chips may be .bin files)
             else:
                 for m, crc in roms: found.append((f"{p}#{m}", os.path.splitext(m)[1].lower(), crc))
@@ -218,11 +227,27 @@ def scan(roots=None, dbs=None, listed=None, progress=None):
     folder_system = {}                                                  # folder -> the system most games listed in it are for
     for sy, p in listed:
         if sy not in ARCADE_PLAYLISTS: folder_system.setdefault(os.path.dirname(split_archive(p)[0]), Counter())[sy] += 1
+    # folders without listed games (a library built from scratch): the system most games recognised there are for
+    recognised_in = {}
+    arcade_in = Counter(os.path.dirname(p) for p, kind, _ in found if kind == "arcade")
+    for p, kind, crcs in found:
+        if kind in ("arcade", "lone"): continue
+        d = os.path.dirname(split_archive(p)[0])
+        if d in folder_system: continue
+        hits = next((by_crc[x] for x in crcs if x and x in by_crc), [])
+        sy = EXT_SYSTEM.get(kind) or (hits[0][0] if len({h[0] for h in hits}) == 1 else None)
+        if sy and hits: recognised_in.setdefault(d, Counter())[sy] += 1
+    for d, c in recognised_in.items(): folder_system[d] = c
+    def lone_is_console(p):                     # its folder is mostly console games (not an arcade romset folder)
+        near = folder_system.get(os.path.dirname(p))
+        return bool(near) and sum(near.values()) > arcade_in[os.path.dirname(p)]
+    found = [((f"{p}#{info[0]}", os.path.splitext(info[0])[1].lower(), info[1]) if lone_is_console(p) else (p, "arcade", None))
+             if kind == "lone" else (p, kind, info) for p, kind, info in found]
     rows = []                                   # (path, kind, its checksums, system, name in the database, set name)
     for p, kind, crcs in found:
         if kind == "arcade":
             set_name = os.path.splitext(os.path.basename(p))[0].lower()
-            sy, name = (listed_paths[p], None) if p in listed_paths else sets.get(set_name, (None, None))
+            sy, name = (listed_paths[p], None) if p in listed_paths else sets.get(set_name, (UNKNOWN_SETS, None))
             rows.append((p, kind, (), sy, name, set_name)); continue
         crcs = tuple(x for x in crcs if x)
         hits = next((by_crc[x] for x in crcs if x in by_crc), [])      # the checksum the database knows, if either

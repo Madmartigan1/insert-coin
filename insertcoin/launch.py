@@ -7,6 +7,7 @@ from insertcoin.coreinstall import own_core
 from insertcoin.snes import chip_core
 from insertcoin.logs import log
 from insertcoin.cores import core_file, is_builtin
+from insertcoin.settings import retroarch_installed
 from insertcoin.controllers import controller_style, sdl_controller_update
 from insertcoin.names import split_archive
 from insertcoin.web import FLASH_PAGE, RUFFLE, WebGame, browser_command, close_stale_browsers, find_browser, serve_folder
@@ -48,7 +49,9 @@ class Launcher:
             self.err("No core is set for this game yet - assign one in RetroArch"); return
         if not os.path.exists(split_archive(g.path)[0]):
             self.err("ROM file not found"); return
-        engine = self.settings.get("engine") and is_builtin(g.core)
+        engine = (self.settings.get("engine") or not retroarch_installed()) and is_builtin(g.core)
+        if not engine and not retroarch_installed():
+            self.err("This game's core isn't one the built-in player runs, and RetroArch isn't installed"); return
         who = "Built-in player" if engine else "RetroArch"
         self.sfx.play("coin"); self.draw(); self.splash(g, engine)
         self.sfx.finish(); self.sfx.close()                          # hand the audio device to the game
@@ -72,7 +75,9 @@ class Launcher:
                     rc = subprocess.run([sys.executable, f"{HERE}/engine.py", run_core, g.path, "--title", g.title]
                                         + (["--system", g.db] if g.db else []) + (["--windowed"] if self.windowed else []),
                                         stdout=out, stderr=subprocess.STDOUT).returncode
-                if rc and time.time() - t0 < 10:                     # didn't start: let RetroArch try it instead
+                if rc and time.time() - t0 < 10 and not retroarch_installed():
+                    log.warning("Built-in player could not start it (exit %s); RetroArch isn't installed to try instead", rc)
+                elif rc and time.time() - t0 < 10:                   # didn't start: let RetroArch try it instead
                     log.warning("Built-in player could not start it (exit %s), trying RetroArch", rc)
                     try:
                         errs = [ln.rstrip() for ln in open(ralog, errors="replace") if "[ERROR]" in ln]

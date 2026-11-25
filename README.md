@@ -149,7 +149,7 @@ and **left** or **B** goes back to the keyboard.
 | **Sound: On / Off** | Menu sounds |
 | **Player: RetroArch / Built-in (beta)** | Which program plays your games — see [Built-in player](#built-in-player-beta) |
 | **Games: One per game / Show all** | Group copies and versions of a game into one entry, or list every ROM |
-| **Library: RetroArch / Insert Coin (beta)** | Where the list of games comes from: RetroArch's playlists, or Insert Coin's own library. The first time you choose Insert Coin, it copies your RetroArch playlists into its own library (a second or so); after that it reads its own copy. Same games, versions and box art either way. Insert Coin's library keeps its own Favorites and Recently Played too (copied from RetroArch's the first time), and every change is also written to RetroArch's, so switching back shows the same lists. If Insert Coin's library can't be read, it shows RetroArch's playlists and says so |
+| **Library: RetroArch / Insert Coin (beta)** | Where the list of games comes from: RetroArch's playlists, or Insert Coin's own library. The first time you choose Insert Coin, it copies your RetroArch playlists into its own library (a second or so); after that it reads its own copy. Same games, versions and box art either way. Insert Coin's library keeps its own Favorites and Recently Played too (copied from RetroArch's the first time), and every change is also written to RetroArch's, so switching back shows the same lists. If Insert Coin's library can't be read, it shows RetroArch's playlists and says so. Without RetroArch, Insert Coin's own library is used (see [Without RetroArch](#without-retroarch)) |
 | **Set up controller** | Redo the button set-up for an unrecognised pad |
 | **Exit Insert Coin** | Close Insert Coin |
 
@@ -193,7 +193,8 @@ Switch / SNES-style means controllers with the Nintendo layout: Switch Pro, Joy-
 ## Built-in player (beta)
 
 Insert Coin can play games itself, without starting RetroArch. Turn it on with **B** on the home
-screen → **Player: Built-in (beta)**; switch back to **Player: RetroArch** at any time.
+screen → **Player: Built-in (beta)**; switch back to **Player: RetroArch** at any time. Without RetroArch
+installed it is always on.
 
 - **What it is:** a small libretro *frontend* inside Insert Coin. It loads Insert Coin's own copy
   of each core once you've run `--cores` (see [Insert Coin's own cores](#insert-coins-own-cores)),
@@ -486,8 +487,8 @@ Start **Insert Coin** from your applications menu, or run:
 | `--copy-art` | Copy RetroArch's box art into Insert Coin's own art folder and check every picture and every game; see [Copying RetroArch's art](#copying-retroarchs-art---copy-art) |
 | `--cores` | Copy the built-in player's emulator cores into Insert Coin's own folder (downloading any RetroArch doesn't have); see below |
 | `--databases` | Download the game databases (which game a file is, its year and publisher) into Insert Coin's own folder; see [Insert Coin's own game databases](#insert-coins-own-game-databases) |
-| `--scan` | Look through your game folders and report the games that aren't in your library yet, system by system — **changes nothing** (beta; see below) |
-| `--scan --add` | The same, then test-start each game found and add the ones that start to Insert Coin's own library (beta; see below) |
+| `--scan [FOLDER]` | Look through your game folders (or the folders named) and report the games that aren't in your library yet, system by system — **changes nothing** (beta; see below) |
+| `--scan --add [FOLDER]` | The same, then test-start each game found and add the ones that start to Insert Coin's own library (beta; see below). Without RetroArch, this is how a library is made: `insert-coin --scan --add ~/Games` |
 | `--scan --add --retry` | The same, and give the games left out for a black screen up to 6 more starts each |
 | `--help`, `-h` | List these options. An option Insert Coin doesn't know is refused with a message; it never opens the app |
 
@@ -509,14 +510,32 @@ steps 3 and 4.
 Since 0.8 `--scan --add` test-starts and adds Nintendo 64 games too (run `--cores` first, so the N64 core is
 installed).
 
+### Without RetroArch
+
+Insert Coin no longer needs RetroArch to be installed. When it isn't (no `retroarch` program, or no
+`~/.config/retroarch/playlists`), Insert Coin starts with its own library (*Library: Insert Coin*) and plays
+every game in the built-in player, and it never creates anything in RetroArch's folders. To make the library:
+
+1. `insert-coin --databases` (the game databases, so games can be recognised) and `insert-coin --cores` (the
+   emulator cores).
+2. `insert-coin --scan --add FOLDER`, with the folder that holds your games (several folders are fine).
+
+On an empty library, console games the databases know by their checksum go straight in, without a test start,
+because they're known good dumps; games placed only by their file type and all arcade sets are test-started as
+usual. That makes the first run much quicker (for a large collection still an hour or more: arcade sets take
+the longest). Later runs test everything new, as before.
+
 ### Scanning for games (beta)
 
-`--scan` looks through the folder that holds your games (found from your library) and recognises each game by
+`--scan` looks through the folder that holds your games (found from your library, or the folders you name) and recognises each game by
 its checksum, read from the zip's index without unpacking it, and arcade games by their set name, using
 the game databases (RetroArch's, and Insert Coin's own copy once you've run `--databases`). It also recognises Mega Drive `.smd` files, NES ROMs with unusual headers and Super
 Nintendo ROMs with a copier header. For each system it reports how many games are already **listed**, how many
 are **new** (recognised but not in your library), how many it could only place **by type** (not in the
-database, such as translations and hacks), and how many are **copies** of games you already have. BIOS and
+database, such as translations and hacks), and how many are **copies** of games you already have. A file whose
+type several systems use (a `.bin`) goes with the games beside it. An arcade zip whose set name no database
+knows (an older or renamed set) is counted by type for the MAME list: if a test start works, it's added under
+its set name (for example `pixelk2`), without box art. BIOS and
 enhancement-chip files are set apart. The first scan reads every archive's index (a few minutes for a large
 collection); later scans only read what changed. The full list goes to
 `~/.local/share/insert-coin/scan-report.json`.
@@ -528,10 +547,11 @@ shows something, so games without box art or with a dark title screen still coun
 can't be loaded, the player stops with an error, or the screen stays black the whole time (a black screen gets a
 second start, since some cores fill the console's memory with random values at power-on). FinalBurn Neo
 shows its own error screen for an arcade set with files missing, so a set it reports files missing for is left
-out too. When these rules improve, games added by an earlier run are tested again, and taken out of the
+out too; it shows one for a set name it doesn't know as well, so FinalBurn Neo is only tried with set names in its
+database. When these rules improve, games added by an earlier run are tested again, and taken out of the
 library if they no longer pass (their files stay where they are). Arcade sets are also
-tried with the other arcade cores, and Mega Drive games with PicoDrive when BlastEm can't start them (it
-can't read `.smd` files); the core that starts a game is remembered. Games are added to Insert Coin's
+tried with the other arcade cores (last of all FB Alpha 2012 CPS-3, for older CPS-3 sets), and Mega Drive games with PicoDrive when BlastEm can't start them (it
+can't read `.smd` files), and Super Nintendo games with Snes9x when Mesen-S can't (some betas); the core that starts a game is remembered. Games are added to Insert Coin's
 own library only (B menu → *Library: Insert Coin*); RetroArch's playlists aren't changed, and the library as it
 was before is kept beside it (`library.json.pre-scan-…`). Games left out are never deleted: they're listed with
 the reason in `~/.local/share/insert-coin/scan-not-added.json`. Running it again only tests what is new or changed. A

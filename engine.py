@@ -47,21 +47,26 @@ def split_archive(path):
     return (path[:m.end() - 1], path[m.end():]) if m else (path, "")
 
 def archive_names(path):
-    """The files inside a .zip or .7z."""
+    """The files inside a .zip or .7z. Zips Python can't read (e.g. 'Corrupt extra field', written by some old
+    zip tools; the files themselves are fine) are read with 7-Zip, like the scanner does."""
     if path.lower().endswith(".zip"):
-        with zipfile.ZipFile(path) as z: return z.namelist()
+        try:
+            with zipfile.ZipFile(path) as z: return z.namelist()
+        except zipfile.BadZipFile: pass
     out = sevenzip("l", "-slt", "-ba", path).decode(errors="replace")
     return [ln[7:] for ln in out.splitlines() if ln.startswith("Path = ")]
 
 def archive_read(path, inner):
     if path.lower().endswith(".zip"):
-        with zipfile.ZipFile(path) as z: return z.read(inner)
+        try:
+            with zipfile.ZipFile(path) as z: return z.read(inner)
+        except zipfile.BadZipFile: pass
     return sevenzip("e", "-so", path, inner)
 
 def sevenzip(*args):
     """.7z archives are opened with the 7-Zip program (package p7zip-full / 7zip)."""
     exe = shutil.which("7z") or shutil.which("7za") or shutil.which("7zz")
-    if not exe: raise SystemExit("[ERROR] This game is in a .7z archive: install 7-Zip (package p7zip-full or 7zip)")
+    if not exe: raise SystemExit("[ERROR] This game's archive needs 7-Zip to open: install it (package p7zip-full or 7zip)")
     import subprocess
     r = subprocess.run([exe, *args], capture_output=True)
     if r.returncode: raise SystemExit(f"[ERROR] 7-Zip could not read {os.path.basename(args[-2] if args[0] == 'e' else args[-1])}")
