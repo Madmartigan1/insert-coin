@@ -4,6 +4,35 @@ All notable changes to Insert Coin. Versions follow [semantic versioning](https:
 before 1.0, minor versions add features and patch versions fix bugs.
 Each version is also a [GitHub Release](https://github.com/Madmartigan1/insert-coin/releases).
 
+## [0.8.0] — 2026-11-24 · "Third Dimension"
+
+### Added
+- **Nintendo 64 in the built-in player.** N64 games now play in Insert Coin itself, like every
+  other system. Their core (Mupen64Plus-Next with GLideN64) draws on the graphics card: the
+  built-in player gives it a hidden OpenGL context and shows each finished frame like any other,
+  so the pause menu, save states, Continue and the picture looks all work for N64 too. It uses the
+  core settings you chose in RetroArch; a setting that needs Vulkan (the ParaLLEl-RDP plugin) opens
+  the game in RetroArch instead. `--cores` now installs the N64 core, and `--scan --add` can
+  test-start N64 games.
+- **Button layouts made in RetroArch work in the built-in player.** RetroArch's remap files (for
+  one game, a folder or a whole core) are read for every system, e.g. swapped sticks for an N64
+  shooter. An arcade game's own **Controls** layout still comes first.
+- **Credits** section in the README: every core with its authors and license, and the libraries,
+  data and documentation Insert Coin relies on.
+
+### Changed
+- The **Continue** question has a third choice, **Not now**: back to Insert Coin without starting
+  the game, keeping the Continue point. **B** now means Not now (it used to start over), and
+  Select + Start no longer answers the question by accident.
+- On the N64 the left stick is only the stick (on other systems it also works as the d-pad), as in
+  RetroArch: N64 games use the d-pad for other things.
+
+### Notes
+- An N64 Continue point runs a fifth of a second of the game out of sight before loading (the core
+  takes a state back only after its first frame).
+- A few N64 games may crash with the GLideN64 graphics plugin in RetroArch as well; changing the
+  core's RDP plugin to angrylion in RetroArch's core options lets them run.
+
 ## [0.7.0] — 2026-11-24 · "Continue?"
 
 ### Added
