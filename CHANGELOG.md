@@ -4,6 +4,12 @@ All notable changes to Insert Coin. Versions follow [semantic versioning](https:
 before 1.0, minor versions add features and patch versions fix bugs.
 Each version is also a [GitHub Release](https://github.com/Madmartigan1/insert-coin/releases).
 
+## [0.8.1] — 2026-11-24
+
+### Fixed
+- The progress line of `--cores`, `--scan`, `--scan --add` and `--copy-art` no longer leaves bits
+  of longer text behind (e.g. "Copied from RetroArch: 1tro.so").
+
 ## [0.8.0] — 2026-11-24 · "Third Dimension"
 
 ### Added
