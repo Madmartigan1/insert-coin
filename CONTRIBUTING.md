@@ -111,7 +111,11 @@ somewhere temporary.
    still start (`python3 -m compileall -q insert_coin.py engine.py paths.py insertcoin`), and
    render the screenshots with `--shot`.
 4. Update `README.md` if you change controls, options, requirements or files written.
-5. Open a pull request describing the change, how you tested it, and screenshots for UI changes.
+5. **Credit other people's work.** If your change uses, follows or adapts code, data, formats or
+   ideas from another project, name the project, its authors and its license in the file's header
+   comment and in the [Credits](README.md#credits) section of the README. Don't copy code whose
+   license doesn't allow it in an MIT project.
+6. Open a pull request describing the change, how you tested it, and screenshots for UI changes.
 
 ## Versioning
 

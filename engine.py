@@ -11,7 +11,7 @@ ROM may be a plain file, a zip, or RetroArch-style "archive.zip#file.nes".
 In a game: Select + Start (or Esc) pauses and opens a small menu: Resume / Save state / Load state /
 Controls (arcade games) / Quit game. Save states: 4 slots per game, each with a picture and the date.
 Picture (sharp / smoothed / scanlines) is chosen there too, for every game of that system (--system,
-the playlist name; the core's name without it). Quitting keeps a Continue point (after ~10 s of play); the next start asks Continue / Start over.
+the playlist name; the core's name without it). Quitting keeps a Continue point (after ~10 s of play); the next start asks Continue / Start over / Not now.
 Controls changes which button does what, for this game only (saved per game). The keyboard is
 also passed to the core, so e.g. Tab opens MAME's own menu in arcade games.
 
@@ -20,10 +20,11 @@ Testing: --press NAME@FIRST-LAST holds a button during those frames (a RetroPad 
 --probe runs the game as fast as it can, with no sound, saves or controllers, looks at every 30th frame and
 ends with "Probe: N of M frames lit" (how Insert Coin checks that a newly found game starts).
 
-Supported so far: cores that draw in software (NES, SNES, Mega Drive, Game Boy, arcade, Neo Geo...).
-Cores that need the graphics card (N64, some PS1 modes) are a later step.
+Cores that draw in software (NES, SNES, Mega Drive, Game Boy, arcade, Neo Geo...) hand over each frame in
+memory. Cores that draw with OpenGL on the graphics card (Mupen64Plus-Next for the N64) get a window-less
+OpenGL context; their frames are copied back and then shown the same way (see insertcoin/glvideo.py).
 """
-import ctypes as C, os, re, sys, time, json, shutil, struct, tempfile, threading, zipfile
+import contextlib, ctypes as C, os, re, sys, time, json, shutil, struct, tempfile, threading, zipfile
 
 os.environ.setdefault("PYGAME_HIDE_SUPPORT_PROMPT", "1")
 import pygame
@@ -35,6 +36,7 @@ if os.path.dirname(os.path.abspath(__file__)) not in sys.path:     # also when l
 from paths import RA, APPDIR, SAVES, STATES, SYSTEM, CONFDIR, PICTURE
 from insertcoin.cores import has_face_turbo, has_states, has_turbo, is_arcade, state_warmup
 from insertcoin.systems import FRIENDLY
+from insertcoin import glvideo
 W, H = 1920, 1080
 
 def split_archive(path):
@@ -221,6 +223,7 @@ class Player:
         self.font = lambda n, _c={}: _c.setdefault(n, pygame.font.Font(fp, n))
         self.av = AVInfo()                                    # some cores report their size while loading
         self.system = system; self.scan_cache = {}
+        self.hw = None; self.gl = None                        # graphics-card cores (N64): see insertcoin/glvideo.py
 
         flags = 0 if shot or probe else pygame.SCALED | (0 if windowed else pygame.FULLSCREEN)
         self.screen = pygame.display.set_mode((W, H), flags, vsync=0 if shot or probe else 1)
@@ -250,6 +253,7 @@ class Player:
         self.load_game()
         self.av = AVInfo(); L.retro_get_system_av_info(C.byref(self.av))
         g, t = self.av.geometry, self.av.timing
+        if self.hw: self.start_gl()
         log("INFO", f"Video {g.base_width}x{g.base_height} aspect {g.aspect_ratio:.3f}, {t.fps:.3f} fps, sound {t.sample_rate:.0f} Hz")
         for port in range(2): L.retro_set_controller_port_device(port, DEVICE_JOYPAD)
         if not probe:
@@ -336,10 +340,11 @@ class Player:
             if cmd == 24: C.cast(data, C.POINTER(C.c_uint64))[0] = (1 << DEVICE_JOYPAD) | (1 << DEVICE_KEYBOARD) | (1 << DEVICE_ANALOG); return True
             if cmd == 27:                                    # GET_LOG_INTERFACE
                 C.cast(data, C.POINTER(C.c_void_p))[0] = C.cast(self.log_cb, C.c_void_p).value; return True
+            if cmd == 14: return self.set_hw_render(data)    # SET_HW_RENDER: the core draws on the graphics card
             if cmd == 32:                                    # SET_SYSTEM_AV_INFO
-                self.av = C.cast(data, C.POINTER(AVInfo))[0]; return True
+                self.av = C.cast(data, C.POINTER(AVInfo))[0]; self.grow_gl(); return True
             if cmd == 37:                                    # SET_GEOMETRY
-                self.av.geometry = C.cast(data, C.POINTER(Geometry))[0]; return True
+                self.av.geometry = C.cast(data, C.POINTER(Geometry))[0]; self.grow_gl(); return True
             if cmd == 38: return self.give_string(data, "Player 1")                     # GET_USERNAME
             if cmd == 39: C.cast(data, C.POINTER(C.c_uint))[0] = 0; return True        # GET_LANGUAGE: English
             if cmd == 47:
@@ -361,6 +366,47 @@ class Player:
         except Exception as e:
             log("WARN", f"Environment call {cmd} failed: {e}")
         return False                                         # anything else: "not supported", cores cope
+
+    # -- cores that draw on the graphics card (OpenGL): a window-less context, frames copied back (glvideo.py)
+    def set_hw_render(self, data):
+        hw = C.cast(data, C.POINTER(glvideo.HWRender))[0]
+        kind = glvideo.HW_TYPE_NAMES.get(hw.context_type, f"type {hw.context_type}")
+        if hw.context_type not in glvideo.SUPPORTED:
+            log("INFO", f"The core asked for {kind}, which the built-in player doesn't offer"); return False
+        if self.gl is None:
+            try:
+                self.gl = glvideo.GLContext(hw.version_major or (3 if hw.context_type == glvideo.HW_OPENGL_CORE else 2),
+                                            hw.version_minor, core_profile=hw.context_type == glvideo.HW_OPENGL_CORE)
+            except glvideo.GLError as e:
+                log("WARN", f"No {kind} {hw.version_major}.{hw.version_minor} for this core: {e}"); return False
+            log("INFO", f"Graphics card: {self.gl.renderer}, OpenGL {self.gl.version}")
+        self.fb_cb = glvideo.FRAMEBUFFER_T(lambda: self.gl.fbo)
+        self.proc_cb = glvideo.PROC_T(lambda name: self.gl.proc(name))
+        hw.get_current_framebuffer = C.cast(self.fb_cb, C.c_void_p).value
+        hw.get_proc_address = C.cast(self.proc_cb, C.c_void_p).value
+        self.hw = glvideo.HWRender.from_buffer_copy(hw)       # our copy: the core's may not outlive the call
+        log("INFO", f"The core draws with {kind} {hw.version_major}.{hw.version_minor}")
+        return True
+
+    def in_gl(self):
+        """Around calls that may draw: the core's OpenGL context in use (nothing to do for other cores)."""
+        return self.gl.active() if self.gl else contextlib.nullcontext()
+
+    def start_gl(self):
+        """After the game is loaded: make the framebuffer, then let the core set up its graphics."""
+        g = self.av.geometry
+        with self.gl.active():
+            self.gl.framebuffer(max(g.max_width, g.base_width), max(g.max_height, g.base_height), self.hw.depth, self.hw.stencil)
+            if self.hw.context_reset: glvideo.RESET_T(self.hw.context_reset)()
+
+    def grow_gl(self):
+        if self.gl and self.gl.fbo:
+            g = self.av.geometry
+            with self.gl.active(): self.gl.framebuffer(max(g.max_width, g.base_width), max(g.max_height, g.base_height))
+
+    def stop_gl(self):
+        if self.hw and self.hw.context_destroy and self.gl and self.gl.fbo:
+            with self.gl.active(): glvideo.RESET_T(self.hw.context_destroy)()
 
     def give_string(self, data, s):
         b = C.create_string_buffer(s.encode()); self.keep.append(b)
@@ -435,7 +481,10 @@ class Player:
 
     def step(self):
         """Run the core for one frame."""
-        self.lib.retro_run(); self.ran += 1
+        if self.gl:
+            with self.gl.active(): self.lib.retro_run()       # the core draws in its own OpenGL context (glvideo.py)
+        else: self.lib.retro_run()
+        self.ran += 1
 
     def warm_up(self):
         """Some cores only take a state back once the game's start-up is over (MAME 2003-Plus): run the rest of it
@@ -464,10 +513,15 @@ class Player:
         if not self.interactive or played < self.CONTINUE_MIN or not self.can_save_state(): return False
         return self.save_state("continue")
 
+    ASK = ("Continue", "Start over", "Not now")
+
     def ask_key(self, k):
-        if k in ("left", "right", "up", "down"): self.ask_sel ^= 1
+        if k in ("left", "right"): self.ask_sel = max(0, min(len(self.ASK) - 1, self.ask_sel + (1 if k == "right" else -1)))
+        elif k == "ok" and self.ASK[self.ask_sel] == "Not now":     # not now: back to Insert Coin, the Continue point kept
+            log("INFO", "Quit chosen from the game menu, 'Not now' at the Continue question (the game was not started)")
+            self.running = False
         elif k in ("ok", "back"):
-            start_over = k == "back" or self.ask_sel == 1
+            start_over = k == "back" or self.ASK[self.ask_sel] == "Start over"
             self.set_pause(False)
             if start_over: log("INFO", "Starting over")
             elif self.load_state("continue"): self.core_message("Continued where you left off", 2)
@@ -490,8 +544,8 @@ class Player:
         if when is not None:
             t = self.font(24).render(time.strftime("%d %b %Y  %H:%M", time.localtime(when)).lstrip("0"), True, (160, 165, 185))
             self.screen.blit(t, t.get_rect(midtop=(W // 2, pic.bottom + 12)))
-        for k, label in enumerate(("Continue", "Start over")):
-            r = pygame.Rect(0, 0, 280, 72); r.center = (W // 2 + (k * 2 - 1) * 160, box.bottom - 110)
+        for k, label in enumerate(self.ASK):
+            r = pygame.Rect(0, 0, 230, 72); r.center = (W // 2 + (k - 1) * 250, box.bottom - 110)
             on = k == self.ask_sel
             pygame.draw.rect(self.screen, (230, 232, 240) if on else (55, 58, 75), r, border_radius=20)
             t = self.font(30).render(label, True, (20, 22, 30) if on else (230, 232, 240)); self.screen.blit(t, t.get_rect(center=r.center))
@@ -509,7 +563,8 @@ class Player:
         size = self.lib.retro_serialize_size()
         if not size: log("WARN", "This core can't save states"); return False
         buf = C.create_string_buffer(size)
-        if not self.lib.retro_serialize(buf, size): log("WARN", "The core could not save the state"); return False
+        with self.in_gl(): ok = self.lib.retro_serialize(buf, size)
+        if not ok: log("WARN", "The core could not save the state"); return False
         p = self.state_path(slot); os.makedirs(os.path.dirname(p), exist_ok=True)
         with open(p + ".tmp", "wb") as f: f.write(buf.raw)
         os.replace(p + ".tmp", p)
@@ -531,7 +586,8 @@ class Player:
         with open(p, "rb") as f: data = f.read()
         self.warm_up()
         buf = C.create_string_buffer(data, len(data))
-        if not self.lib.retro_unserialize(buf, len(data)):
+        with self.in_gl(): ok = self.lib.retro_unserialize(buf, len(data))
+        if not ok:
             log("WARN", f"The core could not load {os.path.basename(p)}"); return False
         log("INFO", f"State loaded: {os.path.basename(p)}")
         return True
@@ -589,6 +645,12 @@ class Player:
     # -- picture
     def video(self, data, w, h, pitch):
         if not data: return                                  # "same frame as before"
+        if data == glvideo.HW_FRAME_VALID:                   # drawn on the graphics card: copy it back
+            if not self.gl or not w or not h: return
+            w, h, raw = self.gl.read(w, h)
+            # RGBX, not RGBA: a surface with alpha would make every screen blit a slow blend
+            self.frame = pygame.image.frombytes(raw, (w, h), "RGBX", bool(self.hw.bottom_left_origin))
+            return
         bpp, depth, masks = PIXFMT[self.pixfmt]
         if self.surf is None or self.surf.get_size() != (pitch // bpp, h) or self.surf.get_pitch() != pitch:
             self.surf = pygame.Surface((pitch // bpp, h), 0, depth, masks)
@@ -848,7 +910,8 @@ class Player:
         if self.paused and self.mode == "wait" and time.time() > self.wait_until: self.mode = "controls"
         # Select + Start together (on any pad) opens the menu; a second press closes it
         both = any(c.get_button(pygame.CONTROLLER_BUTTON_BACK) and c.get_button(pygame.CONTROLLER_BUTTON_START) for c, _ in self.pads)
-        if both and not self.combo_down: self.set_pause(not self.paused)
+        if both and not self.combo_down and not (self.paused and self.mode == "ask"):   # the question needs an answer
+            self.set_pause(not self.paused)
         self.combo_down = both
 
     def set_pause(self, on):
@@ -1095,7 +1158,10 @@ class Player:
             # waiting for Python's lock to call _feed - a deadlock (seen on 2026-11-04). main() leaves with
             # os._exit instead, and the system releases the device.
             if self.audio: self.audio.closing = True
-            self.lib.retro_unload_game(); self.lib.retro_deinit()
+            try: self.stop_gl()                               # like RetroArch: the core lets go of its graphics first
+            except Exception as e: log("WARN", f"Closing the core's graphics: {e}")
+            with self.in_gl(): self.lib.retro_unload_game(); self.lib.retro_deinit()
+            if self.gl: self.gl.close()
             wd.cancel()
             if self.tmpdir: shutil.rmtree(self.tmpdir, ignore_errors=True)
             log("INFO", f"Content ran for {frames} frames ({frames / (self.av.timing.fps or 60):.1f} s of game){snd}")

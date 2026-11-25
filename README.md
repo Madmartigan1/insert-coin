@@ -34,6 +34,7 @@ just your games, the way a console shows them.
 - [Troubleshooting](#troubleshooting)
 - [Uninstall](#uninstall)
 - [Changelog](CHANGELOG.md)
+- [Credits](#credits)
 - [Legal](#legal)
 - [License](#license)
 
@@ -221,8 +222,10 @@ screen → **Player: Built-in (beta)**; switch back to **Player: RetroArch** at 
   in `~/.config/insert-coin/picture.json`.
 - **Continue:** when you quit a game after playing it for at least 10 seconds, Insert Coin keeps
   that moment as its *Continue point*. The next time you start the game it asks **Continue** (with
-  a picture of where you were and the date) or **Start over**; **B** also starts over. Starting
-  over keeps the Continue point until you quit again. It sits beside the slots, as
+  a picture of where you were and the date), **Start over** or **Not now** (back to Insert Coin
+  without starting the game); **B** also starts over. Select + Start does nothing on this question,
+  so it can't start the game by accident. Starting over or choosing Not now keeps the Continue point until
+  you play and quit again. It sits beside the slots, as
   `<game>.continue.state`, and doesn't use one of the 4 slots.
 - **Controls per game** *(arcade and Neo Geo)*: **Select + Start** → **Controls** lists the game's
   buttons, with the names the emulator gives them (often *Button A*, *Coin*, …). Home-console
@@ -641,6 +644,54 @@ rm -f ~/.local/share/applications/insert-coin.desktop ~/.config/autostart/insert
 ```
 
 Your RetroArch setup, games, saves and favorites are not touched.
+
+## Credits
+
+Insert Coin stands on the work of many other people. Thank you to all of them.
+
+**Emulator cores.** Insert Coin doesn't include any cores. The built-in player loads the libretro cores you
+install (`--cores` copies them from RetroArch or downloads them from the libretro buildbot), and each keeps its
+own license:
+
+| Core | Systems | Authors | License |
+|---|---|---|---|
+| Mesen | NES / Famicom | M. Bibaud (Sour) | GPLv3 |
+| Mesen-S | SNES / Super Famicom | M. Bibaud (Sour) | GPLv3 |
+| Snes9x | SNES games with DSP / ST01x chips | Snes9x Team | Non-commercial |
+| VBA-M | Game Boy, Game Boy Color, Game Boy Advance | Forgotten, VBA-M Team | GPLv2 |
+| BlastEm | Mega Drive / Genesis | Mike Pavone | GPLv3 |
+| PicoDrive | 32X, Mega Drive (interleaved files) | notaz, fdave, irixxxx | MAME |
+| Beetle SuperGrafx | PC Engine | Mednafen Team | GPLv2 |
+| Beetle NeoPop | Neo Geo Pocket | neopop_uk, Mednafen Team | GPLv2 |
+| PCSX ReARMed | PlayStation | PCSX Team, notaz, Exophase | GPLv2 |
+| Stella | Atari 2600 | Stephen Anthony, Bradford Mott, Eckhard Stolberg, Brian Watson | GPLv2 |
+| FinalBurn Neo | Arcade, Neo Geo | Team FBNeo | Non-commercial |
+| MAME 2003 / MAME 2003-Plus | Arcade | MAMEdev, MAME 2003-Plus Team | MAME (non-commercial) |
+| FB Alpha 2012 CPS-3 | Arcade (CPS-3) | Team FB Alpha | Non-commercial |
+| Mupen64Plus-Next | Nintendo 64 (with GLideN64 graphics) | m4xw, Hacktarux, gonetz, GLideN64 contributors, Mupen64Plus Team | GPLv2 |
+
+**Interfaces and libraries:**
+- [libretro API](https://github.com/libretro/libretro-common) (MIT, © The RetroArch team). The built-in
+  player's structures and numbers follow `libretro.h`; no code is copied.
+- [RetroArch](https://www.retroarch.com) (GPLv3, © The RetroArch team). Insert Coin reads its playlists,
+  favorites, history, core options and game databases, and can launch games in it. No RetroArch code is
+  included.
+- [pygame-ce](https://github.com/pygame-community/pygame-ce) (LGPL 2.1) and [SDL](https://www.libsdl.org)
+  (zlib license): window, picture, sound and controllers.
+- [Khronos EGL and OpenGL](https://registry.khronos.org) function names and values, used to give N64 games a
+  window-less OpenGL context through your system's graphics driver (on Linux usually
+  [Mesa](https://mesa3d.org), whose `EGL_MESA_platform_surfaceless` extension makes this possible).
+- [Ruffle](https://ruffle.rs) (MIT / Apache 2.0): plays Flash games.
+- [7-Zip](https://www.7-zip.org) / p7zip (LGPL): reads `.7z` archives.
+
+**Data and file formats:**
+- The [libretro database](https://github.com/libretro/libretro-database) (RetroArch's `.rdb` files):
+  checksums, years and publishers for the scanner and game info.
+- The [libretro thumbnails](https://github.com/libretro-thumbnails/libretro-thumbnails) project: box art,
+  title screens and snapshots downloaded by `sync_thumbnails.py`.
+- Game file headers (iNES, the SNES cartridge and copier headers, the Super Magic Drive interleave) are read as
+  described in public community documentation such as the [NESdev](https://www.nesdev.org/wiki/) and
+  [SNESdev](https://snes.nesdev.org/wiki/) wikis.
 
 ## Legal
 

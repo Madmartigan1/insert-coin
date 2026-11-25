@@ -12,7 +12,12 @@ set ("gaiden.zip"), recognised by that name. What the scan finds is compared wit
   unknown    a ROM-like file that couldn't be placed, or an archive that couldn't be read
 
 New games are only reported here; they are test-started before anything is added (the next step).
-Results are cached by file size and time, so a scan with nothing changed only lists the folders."""
+Results are cached by file size and time, so a scan with nothing changed only lists the folders.
+
+Sources: checksums are looked up in the libretro database (RetroArch's .rdb files,
+https://github.com/libretro/libretro-database); the iNES header (NESdev wiki, https://www.nesdev.org/wiki/INES),
+the SNES copier header and the Super Magic Drive (.smd) interleave follow public community documentation.
+No code was copied."""
 import json, os, re, subprocess, time, zipfile, zlib
 from collections import Counter
 from paths import APPDIR, CACHE, LIBRARY, RA

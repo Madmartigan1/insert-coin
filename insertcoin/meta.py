@@ -1,4 +1,7 @@
-"""Year, publisher and developer, read from RetroArch's databases."""
+"""Year, publisher and developer, read from RetroArch's databases.
+
+Source: the libretro database (https://github.com/libretro/libretro-database); its .rdb files are
+libretro-db files (MessagePack values, https://msgpack.org), read here with our own small reader."""
 import json, os, threading
 from paths import CACHE, RA
 from insertcoin.names import sanitize, split_archive

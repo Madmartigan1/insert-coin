@@ -6,7 +6,11 @@ built-in player runs those games in Snes9x instead (`insert-coin --cores` instal
 folder they stay with Mesen-S, like every other Super Nintendo game.
 
 Which chip a game has is read from its cartridge header: the "chipset" byte, and for the custom chips (ST010 /
-ST011) the sub-type byte just before the header."""
+ST011) the sub-type byte just before the header.
+
+Sources: the SNES cartridge header layout as documented by the community (SNESdev wiki,
+https://snes.nesdev.org/wiki/ROM_header, and nocash's fullsnes); the chip file names are the ones
+the libretro core info files list. No code was copied."""
 import os, shutil, subprocess, zipfile
 from paths import CORES_DIR, RA
 from insertcoin.cores import core_file

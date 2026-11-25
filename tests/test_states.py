@@ -42,6 +42,7 @@ class Sound:
 def player(core="mesen", takes_from=0, system=None):
     p = Player.__new__(Player)
     p.system, p.scan_cache, p.picture = system, {}, "sharp"
+    p.gl = p.hw = None
     p.core_path, p.name, p.game_name, p.title = CORE(core), core.title(), "Star Pilot (USA)", None
     p.probe, p.shot, p.frames_left, p.audio, p.rotation, p.frame = False, None, None, None, 0, None
     p.av = engine.AVInfo(); p.av.geometry.aspect_ratio = 4 / 3
@@ -206,6 +207,25 @@ class ContinuePoint(unittest.TestCase):
         p = self.asked(); p.menu_key("back")                                   # B: start over too
         self.assertFalse(p.paused); self.assertEqual(p.lib.frames, 0)
         self.assertIsNotNone(p.slot_time("continue"))                          # kept until the next quit
+
+    def test_not_now_leaves_without_starting_the_game(self):
+        p = self.asked(); p.running = True
+        for _ in range(5): p.menu_key("right")                                 # stops at the last choice: Not now
+        self.assertEqual(p.ASK[p.ask_sel], "Not now")
+        p.draw_menu(); p.menu_key("ok")
+        self.assertFalse(p.running); self.assertEqual(p.lib.frames, 0)          # the game never ran
+        self.assertFalse(p.keep_continue(0))                                    # quitting here doesn't replace it
+        self.assertIsNotNone(p.slot_time("continue"))
+
+    def test_select_start_does_not_answer_the_question(self):
+        class Pad:
+            def get_button(self, b): return b in (pygame.CONTROLLER_BUTTON_BACK, pygame.CONTROLLER_BUTTON_START)
+        p = self.asked(); p.pads = [(Pad(), "xbox")]; p.running = True
+        p.open_pads = lambda: None; pygame.event.clear()                       # only the pretend pad (no real ones)
+        p.events()
+        self.assertTrue(p.paused); self.assertEqual(p.mode, "ask")
+        p.combo_down = False; p.mode = "pause"; p.events()                      # in the normal menu it still resumes
+        self.assertFalse(p.paused)
 
     def test_mame_continue_runs_the_start_up_first(self):
         p = player("mame2003_plus", takes_from=1800); p.lib.frames = 9000; p.keep_continue(9000)
