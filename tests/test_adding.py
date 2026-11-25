@@ -46,6 +46,7 @@ class Adding(unittest.TestCase):
         return {g["label"]: g for s in S.read(paths.LIBRARY)["systems"] if s["name"] == system for g in s["games"]}
 
     def test_adds_games_that_start_and_lists_the_rest(self):
+        S.core("mupen64plus_next_libretro.so")                                                  # N64 is test-started too
         r = adding.add_found(report(), starter=FakeStarts(fails=["Dark Run"]), workers=1)
         nes = self.games(NES)
         self.assertIn("Comet Run (USA)", nes); self.assertIn("Comet Run (Hack)", nes)            # name from the file
@@ -53,10 +54,11 @@ class Adding(unittest.TestCase):
         self.assertEqual(sum(1 for s in S.read(paths.LIBRARY)["systems"] if s["name"] == NES for g in s["games"]), 10 + 2)
         c = nes["Comet Run (USA)"]
         self.assertEqual((c["core"], c["db"]), (None, f"{NES}.lpl"))                             # the playlist's own core
-        self.assertEqual(r["added"], {NES: 2, MAME: 1})
+        self.assertEqual(r["added"], {NES: 2, MAME: 1, N64: 1})
+        self.assertIn("Byte Rally (USA)", self.games(N64))
         self.assertEqual({(g["name"], g["why"].split(":")[0]) for g in r["not_added"]},
-                         {("Dark Run (USA)", "black screen for 60 seconds"), ("Byte Rally (USA)", "not tested")})
-        self.assertEqual(len(S.read(adding.NOT_ADDED)["games"]), 2)
+                         {("Dark Run (USA)", "black screen for 60 seconds")})
+        self.assertEqual(len(S.read(adding.NOT_ADDED)["games"]), 1)
         self.assertTrue(os.path.exists(r["backup"]))
         self.assertTrue(os.path.exists(S.rom("new/Dark Run (USA).nes")))                         # never deleted
         self.assertEqual({p: S.read(p) for p in self.ra_before}, self.ra_before)                 # RetroArch's unchanged
@@ -81,7 +83,7 @@ class Adding(unittest.TestCase):
         r = adding.add_found(report(), starter=starter, workers=1)
         why = next(g["why"] for g in r["not_added"] if g["name"] == "Galaxy Run")
         self.assertEqual(why, "missing ROM files (also tried: fbneo)")
-        self.assertIn("(missing ROM files: 1, not tested: 1)", adding.summary(r))
+        self.assertIn("(core not installed: 1, missing ROM files: 1)", adding.summary(r))   # no N64 core here
 
     def test_mega_drive_games_get_a_second_core(self):
         S.core("blastem_libretro.so"); S.core("picodrive_libretro.so")

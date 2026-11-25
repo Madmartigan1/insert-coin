@@ -12,7 +12,7 @@ set it says files are required for fails too. Games added by an earlier run are 
 change, and taken out of the library again if they now fail (their files stay where they are).
 
 Games that fail are never deleted: they are listed, with the reason, in scan-not-added.json. Games whose core
-the built-in player can't run (Nintendo 64) are listed there as "not tested" for now. Results are kept by file
+the built-in player can't run are listed there as "not tested" (none since 0.8, when N64 joined). Results are kept by file
 size and time (and the cores tried), so running it again only tests what is new or changed. With retry, the
 games left out for a black screen are started again, up to RETRY_STARTS times each, and added if one start
 shows something."""

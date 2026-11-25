@@ -12,22 +12,26 @@ from insertcoin.systems import FRIENDLY
 class Core(NamedTuple):
     name: str                   # the name the core reports (retro_get_system_info); also its save-folder name
     systems: tuple = ()         # playlists that start this core by default
-    builtin: bool = False       # the built-in player runs it (draws in software; test-booted)
+    builtin: bool = False       # the built-in player runs it (test-booted)
     arcade: bool = False        # arcade games: the built-in player's pause menu offers Controls
     turbo: bool = False         # two-button systems: holding LB / RB fires the bottom / right button rapidly
     turbo_face: bool = False    # ...and the left / top face buttons too (PC Engine: they're free in 2-button mode)
     states: bool = True         # save states work (FB Alpha 2012 CPS-3 never takes a saved state back)
     warmup: int = 0             # frames a game must have run before it takes a saved state back (MAME 2003-Plus:
-                                # many games ignore one loaded during their start-up)
+                                # many games ignore one loaded during their start-up; Mupen64Plus-Next refuses
+                                # one before its first frame)
+    stick_dpad: bool = True     # the left stick also works as the d-pad (not where games read the stick itself: N64)
 
 
-# file name -> Core. N64 draws with the graphics card, so it stays with RetroArch for now.
+# file name -> Core. Mupen64Plus-Next (N64) draws with the graphics card: the built-in player gives it an OpenGL
+# context (insertcoin/glvideo.py).
 CORES = {
     "mesen_libretro.so": Core("Mesen", ("Nintendo - Nintendo Entertainment System",), builtin=True, turbo=True),
     "mesen-s_libretro.so": Core("Mesen-S", ("Nintendo - Super Nintendo Entertainment System",), builtin=True),
     "vbam_libretro.so": Core("VBA-M", ("Nintendo - Game Boy", "Nintendo - Game Boy Color",
                                        "Nintendo - Game Boy Advance"), builtin=True, turbo=True),
-    "mupen64plus_next_libretro.so": Core("Mupen64Plus-Next", ("Nintendo - Nintendo 64",)),
+    "mupen64plus_next_libretro.so": Core("Mupen64Plus-Next", ("Nintendo - Nintendo 64",), builtin=True, stick_dpad=False,
+                                         warmup=10),
     "blastem_libretro.so": Core("BlastEm", ("Sega - Mega Drive - Genesis",), builtin=True),
     "picodrive_libretro.so": Core("PicoDrive", ("Sega - 32X",), builtin=True),
     "mednafen_supergrafx_libretro.so": Core("Beetle SuperGrafx", ("NEC - PC Engine - TurboGrafx 16",), builtin=True, turbo=True,
@@ -60,6 +64,12 @@ def core_short(path):
 def not_builtin_systems():
     """Friendly names of the systems whose usual core the built-in player can't run (["Nintendo 64"])."""
     return sorted({FRIENDLY[s][0] for c in CORES.values() if not c.builtin for s in c.systems if s in FRIENDLY})
+
+
+def stick_is_dpad(path):
+    """Whether the left stick also presses the d-pad in this core (cores missing from the table: yes, as before)."""
+    c = CORES.get(core_file(path))
+    return c.stick_dpad if c else True
 
 
 def is_builtin(path):

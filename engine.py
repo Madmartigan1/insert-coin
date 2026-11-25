@@ -34,7 +34,8 @@ from pygame._sdl2 import audio as sdla
 if os.path.dirname(os.path.abspath(__file__)) not in sys.path:     # also when loaded with runpy (docs/make_screenshots.py)
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from paths import RA, APPDIR, SAVES, STATES, SYSTEM, CONFDIR, PICTURE
-from insertcoin.cores import has_face_turbo, has_states, has_turbo, is_arcade, state_warmup
+from insertcoin.cores import has_face_turbo, has_states, has_turbo, is_arcade, state_warmup, stick_is_dpad
+from insertcoin import raremap
 from insertcoin.systems import FRIENDLY
 from insertcoin import glvideo
 W, H = 1920, 1080
@@ -223,6 +224,7 @@ class Player:
         self.font = lambda n, _c={}: _c.setdefault(n, pygame.font.Font(fp, n))
         self.av = AVInfo()                                    # some cores report their size while loading
         self.system = system; self.scan_cache = {}
+        self.ra_layout = {}; self.stick_dpad = stick_is_dpad(core_path)
         self.hw = None; self.gl = None                        # graphics-card cores (N64): see insertcoin/glvideo.py
 
         flags = 0 if shot or probe else pygame.SCALED | (0 if windowed else pygame.FULLSCREEN)
@@ -517,11 +519,11 @@ class Player:
 
     def ask_key(self, k):
         if k in ("left", "right"): self.ask_sel = max(0, min(len(self.ASK) - 1, self.ask_sel + (1 if k == "right" else -1)))
-        elif k == "ok" and self.ASK[self.ask_sel] == "Not now":     # not now: back to Insert Coin, the Continue point kept
+        elif k == "back" or (k == "ok" and self.ASK[self.ask_sel] == "Not now"):   # B: back to Insert Coin, nothing lost
             log("INFO", "Quit chosen from the game menu, 'Not now' at the Continue question (the game was not started)")
             self.running = False
-        elif k in ("ok", "back"):
-            start_over = k == "back" or self.ASK[self.ask_sel] == "Start over"
+        elif k == "ok":
+            start_over = self.ASK[self.ask_sel] == "Start over"
             self.set_pause(False)
             if start_over: log("INFO", "Starting over")
             elif self.load_state("continue"): self.core_message("Continued where you left off", 2)
@@ -550,7 +552,7 @@ class Player:
             pygame.draw.rect(self.screen, (230, 232, 240) if on else (55, 58, 75), r, border_radius=20)
             t = self.font(30).render(label, True, (20, 22, 30) if on else (230, 232, 240)); self.screen.blit(t, t.get_rect(center=r.center))
         ok, back = self.menu_buttons()
-        t = self.symfont(22).render(f"{ok}  Choose   \u00b7   {back}  Start over", True, (160, 165, 185))
+        t = self.symfont(22).render(f"{ok}  Choose   \u00b7   {back}  Not now", True, (160, 165, 185))
         self.screen.blit(t, t.get_rect(midbottom=(W // 2, box.bottom - 18)))
 
     def slot_time(self, slot):
@@ -597,11 +599,19 @@ class Player:
 
     def load_remap(self):
         try:
-            m = json.load(open(self.remap_path()))["map"]
+            with open(self.remap_path()) as f: m = json.load(f)["map"]
             self.remap = {int(t): int(s) for t, s in m.items() if int(t) in REMAPPABLE and int(s) in REMAPPABLE}
             if self.remap: log("INFO", f"Using this game's own button layout ({len(self.remap)} changed)")
         except (OSError, ValueError, KeyError, TypeError):
             self.remap = {}
+        # a layout made in RetroArch (insertcoin/raremap.py), unless the game has its own from the Controls screen
+        self.ra_layout = {}
+        if not self.remap:
+            p = raremap.find(f"{RA}/config/remaps", self.name, self.game_name, os.path.dirname(split_archive(self.rom)[0]))
+            if p:
+                self.ra_layout = raremap.read(p)
+                log("INFO", f"RetroArch's button layout {os.path.basename(p)}: "
+                    + (f"{sum(map(len, self.ra_layout.values()))} controls changed" if self.ra_layout else "nothing changed"))
 
     def save_remap(self):
         try:
@@ -795,6 +805,7 @@ class Player:
             if g(btn): bits |= 1 << rid
         if ax(pygame.CONTROLLER_AXIS_TRIGGERLEFT) > .5: bits |= 1 << L2
         if ax(pygame.CONTROLLER_AXIS_TRIGGERRIGHT) > .5: bits |= 1 << R2
+        if not self.stick_dpad: return bits
         x, y = ax(pygame.CONTROLLER_AXIS_LEFTX), ax(pygame.CONTROLLER_AXIS_LEFTY)   # left stick also works as a d-pad
         if x < -.5: bits |= 1 << LEFT
         if x > .5: bits |= 1 << RIGHT
@@ -818,12 +829,18 @@ class Player:
                 if name in RETROPAD_NAMES: bits[0] |= 1 << RETROPAD_NAMES[name]
                 else: self.held_keys.add(pygame.key.key_code(name))
         self.keys = keys
+        sticks = [[(c.get_axis(pygame.CONTROLLER_AXIS_LEFTX), c.get_axis(pygame.CONTROLLER_AXIS_LEFTY)),
+                   (c.get_axis(pygame.CONTROLLER_AXIS_RIGHTX), c.get_axis(pygame.CONTROLLER_AXIS_RIGHTY))]
+                  for c, _ in self.pads]
+        if self.ra_layout:                                    # RetroArch's layout for this game: what each control gives
+            for port, layout in self.ra_layout.items():
+                if port < len(bits):
+                    bits[port], st = raremap.apply(layout, bits[port], sticks[port] if port < len(sticks) else [(0, 0), (0, 0)])
+                    if port < len(sticks): sticks[port] = st
+        self.sticks = sticks
         if self.turbo:
             bits = [turbo_bits(b, self.fno, port in self.six_button, self.turbo_face) for port, b in enumerate(bits)]
         self.bits = [self.apply_remap(b) for b in bits]
-        self.sticks = [[(c.get_axis(pygame.CONTROLLER_AXIS_LEFTX), c.get_axis(pygame.CONTROLLER_AXIS_LEFTY)),
-                        (c.get_axis(pygame.CONTROLLER_AXIS_RIGHTX), c.get_axis(pygame.CONTROLLER_AXIS_RIGHTY))]
-                       for c, _ in self.pads]
 
     def state(self, port, device, index, id_):
         if self.warming: return 0                             # the hidden start-up run before a state: no buttons

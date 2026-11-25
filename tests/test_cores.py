@@ -1,16 +1,16 @@
 """The core table: one entry per core, and everything derived from it."""
 import unittest
 import support  # noqa: F401
-from insertcoin.cores import (CORES, DEFAULT_CORE, ENGINE_CORES, core_file, core_short, is_arcade, is_builtin,
+from insertcoin.cores import (CORES, DEFAULT_CORE, ENGINE_CORES, core_file, core_short, is_arcade, is_builtin, stick_is_dpad,
                               not_builtin_systems)
 from insertcoin.systems import FRIENDLY
 
 
 class CoreTable(unittest.TestCase):
     def test_built_in_player_cores(self):
-        self.assertEqual(len(ENGINE_CORES), 14)
+        self.assertEqual(len(ENGINE_CORES), 15)
         self.assertIn("mesen_libretro.so", ENGINE_CORES)
-        self.assertNotIn("mupen64plus_next_libretro.so", ENGINE_CORES)      # N64 needs the graphics card
+        self.assertIn("mupen64plus_next_libretro.so", ENGINE_CORES)         # N64: drawn on the graphics card (glvideo)
         self.assertTrue(is_builtin("/x/cores/fbneo_libretro.so"))
         self.assertFalse(is_builtin(None))
 
@@ -33,7 +33,13 @@ class CoreTable(unittest.TestCase):
 
     def test_systems_left_to_retroarch(self):
         """What the B menu says when the built-in player is switched on."""
-        self.assertEqual(not_builtin_systems(), ["Nintendo 64"])
+        self.assertEqual(not_builtin_systems(), [])                         # none left since 0.8
+
+    def test_the_stick_is_the_dpad_except_on_the_n64(self):
+        """N64 games read the stick itself and use the d-pad for other things, as in RetroArch."""
+        self.assertFalse(stick_is_dpad("/x/mupen64plus_next_libretro.so"))
+        self.assertTrue(stick_is_dpad("/x/mesen_libretro.so"))
+        self.assertTrue(stick_is_dpad("/x/some_unknown_libretro.so"))          # as before
 
     def test_names(self):
         self.assertEqual(core_file("/home/me/cores/mesen-s_libretro.so"), "mesen-s_libretro.so")

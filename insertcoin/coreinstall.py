@@ -37,7 +37,7 @@ def own_core(path):
 
 
 def wanted():
-    """The cores Insert Coin installs: those the built-in player runs (N64's stays with RetroArch for now)."""
+    """The cores Insert Coin installs: those the built-in player runs."""
     return [f for f, c in CORES.items() if c.builtin]
 
 

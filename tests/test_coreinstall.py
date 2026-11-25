@@ -65,7 +65,7 @@ class CoreInstall(unittest.TestCase):
         self.assertEqual({f: text(f"{S.CORES}/{f}") for f in self.have}, self.ra)   # RetroArch's: untouched
         self.assertEqual({f: os.stat(f"{S.CORES}/{f}").st_mtime for f in self.have}, self.ra_stat)
         self.assertEqual(sorted(os.listdir(S.CORES)), sorted(self.have))
-        self.assertNotIn("mupen64plus_next_libretro.so", os.listdir(paths.CORES_DIR))  # N64 stays with RetroArch
+        self.assertIn("mupen64plus_next_libretro.so", os.listdir(paths.CORES_DIR))     # N64 too, since 0.8
 
     def test_a_core_that_doesnt_load_as_itself_is_not_installed(self):
         fake_core(f"{S.CORES}/{self.have[0]}", "Something Else")

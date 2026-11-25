@@ -204,9 +204,12 @@ class ContinuePoint(unittest.TestCase):
     def test_start_over_leaves_the_game_fresh(self):
         p = self.asked(); p.menu_key("right"); p.menu_key("ok")
         self.assertFalse(p.paused); self.assertEqual(p.lib.frames, 0)
-        p = self.asked(); p.menu_key("back")                                   # B: start over too
-        self.assertFalse(p.paused); self.assertEqual(p.lib.frames, 0)
         self.assertIsNotNone(p.slot_time("continue"))                          # kept until the next quit
+
+    def test_b_means_not_now(self):
+        p = self.asked(); p.running = True; p.menu_key("back")                 # B (or Esc): back, like everywhere else
+        self.assertFalse(p.running); self.assertEqual(p.lib.frames, 0)
+        self.assertIsNotNone(p.slot_time("continue"))
 
     def test_not_now_leaves_without_starting_the_game(self):
         p = self.asked(); p.running = True
@@ -226,6 +229,14 @@ class ContinuePoint(unittest.TestCase):
         self.assertTrue(p.paused); self.assertEqual(p.mode, "ask")
         p.combo_down = False; p.mode = "pause"; p.events()                      # in the normal menu it still resumes
         self.assertFalse(p.paused)
+
+    def test_n64_continue_runs_a_few_frames_first(self):
+        """Mupen64Plus-Next refuses a state before its first frame (the Continue question comes before any)."""
+        self.assertEqual(state_warmup("/x/mupen64plus_next_libretro.so"), 10)
+        p = player("mupen64plus_next", takes_from=1); p.lib.frames = 3000; p.keep_continue(3000)
+        p = player("mupen64plus_next", takes_from=1); p.paused, p.mode = True, "ask"
+        p.menu_key("ok")
+        self.assertEqual(p.lib.run_at_load, 10); self.assertEqual(p.lib.frames, 3000)
 
     def test_mame_continue_runs_the_start_up_first(self):
         p = player("mame2003_plus", takes_from=1800); p.lib.frames = 9000; p.keep_continue(9000)
