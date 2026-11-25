@@ -61,14 +61,14 @@ vice versa.
   playlists are hidden.
 - **Game carousel** — large box art in the middle, the selected game's in-game snapshot blurred
   behind it, and its title screen in a side panel. Year and publisher are shown where
-  RetroArch's databases know them. Games without artwork get a clean name card.
+  the game databases know them. Games without artwork get a clean name card.
 - **Search** — the *Search* tile on the home screen, or **R3** (click the right stick) anywhere in the
   menus, opens an on-screen keyboard. Type part of a name and the matching games from every system
   appear as you type: "ninja" finds every game with that word in its name, "nin gai" narrows it
   down, and numbers match Roman numerals ("2" finds "II"). Type a year to find the games released
   that year ("1991"), a decade ("1990s"), or a company's name to find the games it developed or
   published ("capcom"; from the 4th letter, so "capc" is enough). Mix them with words of the name to narrow it down
-  ("capcom 1991", "capcom street"). Years and companies come from RetroArch's databases, so
+  ("capcom 1991", "capcom street"). Years and companies come from the game databases, so
   games they don't know have none. The results open as a list you can play from, and stay on the
   Search tile.
 - **Favorites** — press **Y** on any game to add or remove it.
@@ -485,6 +485,7 @@ Start **Insert Coin** from your applications menu, or run:
 | `--bios` | Check the BIOS files the built-in player's cores can use, and give Insert Coin its own BIOS folder (a copy of RetroArch's); see below |
 | `--copy-art` | Copy RetroArch's box art into Insert Coin's own art folder and check every picture and every game; see [Copying RetroArch's art](#copying-retroarchs-art---copy-art) |
 | `--cores` | Copy the built-in player's emulator cores into Insert Coin's own folder (downloading any RetroArch doesn't have); see below |
+| `--databases` | Download the game databases (which game a file is, its year and publisher) into Insert Coin's own folder; see [Insert Coin's own game databases](#insert-coins-own-game-databases) |
 | `--scan` | Look through your game folders and report the games that aren't in your library yet, system by system — **changes nothing** (beta; see below) |
 | `--scan --add` | The same, then test-start each game found and add the ones that start to Insert Coin's own library (beta; see below) |
 | `--scan --add --retry` | The same, and give the games left out for a black screen up to 6 more starts each |
@@ -512,7 +513,7 @@ installed).
 
 `--scan` looks through the folder that holds your games (found from your library) and recognises each game by
 its checksum, read from the zip's index without unpacking it, and arcade games by their set name, using
-RetroArch's databases. It also recognises Mega Drive `.smd` files, NES ROMs with unusual headers and Super
+the game databases (RetroArch's, and Insert Coin's own copy once you've run `--databases`). It also recognises Mega Drive `.smd` files, NES ROMs with unusual headers and Super
 Nintendo ROMs with a copier header. For each system it reports how many games are already **listed**, how many
 are **new** (recognised but not in your library), how many it could only place **by type** (not in the
 database, such as translations and hacks), and how many are **copies** of games you already have. BIOS and
@@ -572,6 +573,19 @@ RetroArch's own folder is never changed, and RetroArch keeps using its own cores
 Running it again keeps the copies you have; to replace one, delete it and run `--cores` again. Insert Coin
 doesn't ship cores itself: several don't allow commercial use, so they come from their publisher's server.
 
+### Insert Coin's own game databases
+
+`--databases` downloads the libretro game databases (about 50 MB, 150 files) from the libretro buildbot, the same
+file RetroArch's *Update Databases* uses, into `~/.local/share/insert-coin/database/rdb/`. The download is checked
+(every file must be a game database, and the main ones must be there) before it replaces an older copy, so a
+failed download changes nothing; running it again gets the newest version.
+
+When RetroArch's databases are there too, Insert Coin uses both, so nothing it knew before is lost: the scanner
+recognises a game either copy knows, and a game's year and publisher come from RetroArch's copy first (newer
+databases rename some games, so RetroArch's copy matches the names in RetroArch's playlists) and from Insert
+Coin's copy for games RetroArch's doesn't know. On a computer without RetroArch, Insert Coin's copy is all it
+needs. RetroArch's own databases are never changed.
+
 **Tip:** close RetroArch before starting Insert Coin. Two copies of RetroArch running at once
 can overwrite each other's settings.
 
@@ -584,7 +598,7 @@ can overwrite each other's settings.
 | `~/.config/retroarch/playlists/*.lpl` | Your systems and games, and each game's core |
 | `~/.config/retroarch/thumbnails/` | Box art, snapshots, title screens (after Insert Coin's own folder) |
 | `~/.config/retroarch/content_history.lpl` | Recently Played |
-| `~/.config/retroarch/database/rdb/*.rdb` | Year and publisher information, and (`--scan`) the checksums and arcade set names games are recognised by |
+| `~/.config/retroarch/database/rdb/*.rdb` | Year and publisher information, and (`--scan`) the checksums and arcade set names games are recognised by (together with Insert Coin's own copy, if any) |
 | `~/.config/insert-coin/browser_games.json` | Your browser and Flash game playlists (optional) |
 
 **Writes:**
@@ -605,6 +619,7 @@ can overwrite each other's settings.
 | `~/.cache/insert-coin/scan.json` | What each scanned file holds, so later scans only read what changed |
 | `~/.local/share/insert-coin/system/` | Insert Coin's own BIOS folder (`--bios`), a copy of RetroArch's |
 | `~/.local/share/insert-coin/cores/` | Insert Coin's own copies of the cores (`--cores`), and `cores.json`: where each came from, its version and checksum |
+| `~/.local/share/insert-coin/database/` | Insert Coin's own game databases (`--databases`): `rdb/*.rdb`, and `databases.json` (where and when they were downloaded, and the download's checksum) |
 | `~/.local/share/insert-coin/scan-not-added.json` | Games `--scan --add` found but didn't add, and why (nothing is deleted) |
 | `~/.cache/insert-coin/test-starts.json` | The result of each test start, so later runs only test what is new or changed |
 | `~/.local/share/insert-coin/favorites.json`, `history.json` | Favorites and Recently Played for **Library: Insert Coin**, copied from RetroArch's the first time |
@@ -692,7 +707,8 @@ own license:
 - [7-Zip](https://www.7-zip.org) / p7zip (LGPL): reads `.7z` archives.
 
 **Data and file formats:**
-- The [libretro database](https://github.com/libretro/libretro-database) (RetroArch's `.rdb` files):
+- The [libretro database](https://github.com/libretro/libretro-database) by the libretro team and its
+  contributors (`.rdb` files, RetroArch's or downloaded by `--databases` from the libretro buildbot):
   checksums, years and publishers for the scanner and game info.
 - The [libretro thumbnails](https://github.com/libretro-thumbnails/libretro-thumbnails) project: box art,
   title screens and snapshots downloaded by `sync_thumbnails.py`.

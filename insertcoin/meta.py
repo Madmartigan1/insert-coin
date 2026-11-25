@@ -1,10 +1,12 @@
 """Year, publisher and developer, read from RetroArch's databases.
 
 Source: the libretro database (https://github.com/libretro/libretro-database); its .rdb files are
-libretro-db files (MessagePack values, https://msgpack.org), read here with our own small reader."""
+libretro-db files (MessagePack values, https://msgpack.org), read here with our own small reader. RetroArch's copy
+and Insert Coin's own (insertcoin/databases.py) are both read, RetroArch's first."""
 import json, os, threading
 from paths import CACHE, RA
 from insertcoin.names import sanitize, split_archive
+from insertcoin.databases import rdb_paths
 from insertcoin.web import WebGame
 
 
@@ -55,20 +57,24 @@ class Meta:
     def _load(self, dbs):
         os.makedirs(f"{CACHE}/meta", exist_ok=True)
         for db in dbs:
-            src = f"{RA}/database/rdb/{db}.rdb"; cp = f"{CACHE}/meta/{sanitize(db)}.v2.json"   # v2: + developer
-            if not os.path.exists(src): continue
+            srcs = rdb_paths(db); cp = f"{CACHE}/meta/{sanitize(db)}.v2.json"   # v2: + developer
+            if not srcs: continue
+            key = " | ".join(srcs)                    # which copies it was built from (RetroArch's first)
             try:
-                if os.path.exists(cp) and os.path.getmtime(cp) >= os.path.getmtime(src):
-                    m = json.load(open(cp))
-                else:
-                    m = {}
-                    for e in _rdb_load(src):
-                        yr = e.get("releaseyear"); pub = e.get("publisher") or e.get("developer")
-                        if not (yr or pub): continue
-                        dev = e.get("developer") or ""
-                        v = [yr or "", pub or "", dev if dev != pub else ""]   # shown: year, publisher
-                        if e.get("name"): m.setdefault("n:" + e["name"], v)
-                        if e.get("rom_name"): m.setdefault("r:" + os.path.splitext(e["rom_name"])[0], v)
+                m = None
+                if os.path.exists(cp) and os.path.getmtime(cp) >= max(map(os.path.getmtime, srcs)):
+                    with open(cp) as f: m = json.load(f)
+                    if m.get("_src", f"{RA}/database/rdb/{db}.rdb") != key: m = None   # other copies now
+                if m is None:
+                    m = {"_src": key}
+                    for src in srcs:                  # the first copy that knows a game gives its info
+                        for e in _rdb_load(src):
+                            yr = e.get("releaseyear"); pub = e.get("publisher") or e.get("developer")
+                            if not (yr or pub): continue
+                            dev = e.get("developer") or ""
+                            v = [yr or "", pub or "", dev if dev != pub else ""]   # shown: year, publisher
+                            if e.get("name"): m.setdefault("n:" + e["name"], v)
+                            if e.get("rom_name"): m.setdefault("r:" + os.path.splitext(e["rom_name"])[0], v)
                     with open(cp, "w") as f: json.dump(m, f)
                     old = f"{CACHE}/meta/{sanitize(db)}.json"                   # the cache before v2
                     if os.path.exists(old): os.remove(old)

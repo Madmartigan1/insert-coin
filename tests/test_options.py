@@ -9,7 +9,7 @@ from unittest import mock
 class Options(unittest.TestCase):
     def test_no_options_open_the_app(self):
         for a in ([], ["--windowed"], ["--scan"], ["--scan", "--add"], ["--scan", "--add", "--retry"],
-                  ["--cores"], ["--bios"], ["--shot", "out"], ["--shot", "out", "--windowed"]):
+                  ["--cores"], ["--databases"], ["--bios"], ["--shot", "out"], ["--shot", "out", "--windowed"]):
             self.assertIsNone(check_options(a), a)
 
     def test_help(self):
@@ -17,11 +17,11 @@ class Options(unittest.TestCase):
             text, code = check_options(a)
             self.assertEqual(code, 0)
             self.assertIn(__version__, text)
-            for o in ("--scan --add --retry", "--cores", "--bios", "--windowed"): self.assertIn(o, text)
+            for o in ("--scan --add --retry", "--cores", "--databases", "--bios", "--windowed"): self.assertIn(o, text)
 
     def test_mistakes_are_refused(self):
         for a in (["--hlep"], ["help"], ["--scan", "--ad"], ["--add"], ["--retry"], ["--scan", "--retry"],
-                  ["--shot"], ["--windowed", "-x"]):
+                  ["--shot"], ["--windowed", "-x"], ["--database"]):
             got = check_options(a)
             self.assertIsNotNone(got, a)
             self.assertEqual(got[1], 2, a)

@@ -20,7 +20,7 @@ the SNES copier header and the Super Magic Drive (.smd) interleave follow public
 No code was copied."""
 import json, os, re, subprocess, time, zipfile, zlib
 from collections import Counter
-from paths import APPDIR, CACHE, LIBRARY, RA
+from paths import APPDIR, CACHE, DATABASES, LIBRARY, RA, RA_DATABASES
 from insertcoin.logs import log
 from insertcoin.meta import _rdb_load
 from insertcoin.names import split_archive
@@ -73,20 +73,25 @@ def console_systems():
 
 
 def load_databases(rdb_dir=None):
-    """(crc -> [(system, name)], set name -> (arcade playlist, name)) from RetroArch's databases."""
-    rdb_dir = rdb_dir or f"{RA}/database/rdb"
-    by_crc, sets = {}, {}
-    for sy in console_systems():
-        p = f"{rdb_dir}/{sy}.rdb"
-        if not os.path.exists(p): continue
-        for r in _rdb_load(p, binary=True):
-            if r.get("crc") and r.get("name"): by_crc.setdefault(r["crc"], []).append((sy, r["name"]))
-    for db, playlist in ARCADE:
-        p = f"{rdb_dir}/{db}.rdb"
-        if not os.path.exists(p): continue
-        for r in _rdb_load(p):
-            rn = (r.get("rom_name") or "").lower()
-            if rn.endswith(".zip") and r.get("name"): sets.setdefault(rn[:-4], (playlist, r["name"]))
+    """(crc -> [(system, name)], set name -> (arcade playlist, name)) from the game databases: RetroArch's and
+    Insert Coin's own copy together (a game known to either is known; RetroArch's names first), or those in rdb_dir."""
+    folders = [rdb_dir] if rdb_dir else [RA_DATABASES, DATABASES]     # every RetroArch database before any of ours
+    by_crc, sets, known = {}, {}, {}                    # known: system -> checksums an earlier copy gave it
+    for folder in folders:
+        for sy in console_systems():
+            p = f"{folder}/{sy}.rdb"
+            if not os.path.isfile(p): continue
+            here, before = set(), known.setdefault(sy, set())
+            for r in _rdb_load(p, binary=True):
+                if r.get("crc") and r.get("name") and r["crc"] not in before:
+                    by_crc.setdefault(r["crc"], []).append((sy, r["name"])); here.add(r["crc"])
+            before |= here
+        for db, playlist in ARCADE:
+            p = f"{folder}/{db}.rdb"
+            if not os.path.isfile(p): continue
+            for r in _rdb_load(p):
+                rn = (r.get("rom_name") or "").lower()
+                if rn.endswith(".zip") and r.get("name"): sets.setdefault(rn[:-4], (playlist, r["name"]))
     return by_crc, sets
 
 

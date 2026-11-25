@@ -419,13 +419,14 @@ Options:
   --scan --add           test-start the games found and add those that start to Insert Coin's library
   --scan --add --retry   the same, giving games left out for a black screen more starts
   --cores                copy the built-in player's emulator cores into Insert Coin's own folder
+  --databases            download the game databases (which game a file is, its year and publisher)
   --bios                 check the BIOS files (and give Insert Coin its own BIOS folder, copied from RetroArch's)
   --copy-art             copy RetroArch's box art into Insert Coin's own art folder, and check every picture
   --shot DIR             render sample screens to PNG files and exit (no display needed)
   --help, -h             show this help
 
 More: https://github.com/Madmartigan1/insert-coin#usage"""
-OPTIONS = {"--windowed", "--scan", "--add", "--retry", "--cores", "--bios", "--copy-art", "--shot", "--help", "-h"}
+OPTIONS = {"--windowed", "--scan", "--add", "--retry", "--cores", "--databases", "--bios", "--copy-art", "--shot", "--help", "-h"}
 
 
 def check_options(a):
@@ -494,6 +495,17 @@ def main():
         problems = artwork.verify(progress=bar("checked"))
         line.keep(); print("Checking every game's pictures in both folders...")
         print(artwork.summary(copied, kept, failed, problems, artwork.coverage(artwork.library_games())))
+        return
+    if "--databases" in a:               # Insert Coin's own game databases (no longer RetroArch's)
+        from insertcoin import databases
+        line = Progress()
+        print("Downloading the game databases from the libretro buildbot...")
+        try:
+            info = databases.install(progress=lambda got, total: line.show(
+                f"  {got / 2**20:.1f} of {total / 2**20:.1f} MB" if total else f"  {got / 2**20:.1f} MB"))
+        except (databases.DatabaseError, OSError) as e:
+            line.clear(); print(f"Could not get the game databases: {e}\nNothing was changed."); raise SystemExit(1)
+        line.clear(); print(databases.summary(info))
         return
     if "--cores" in a:                   # copy (or download) the built-in player's cores into Insert Coin's folder
         from insertcoin import coreinstall
