@@ -1,5 +1,6 @@
 """Search: words anywhere in a game's name, from every system; the on-screen keyboard and where B goes."""
 import os, unittest
+from unittest import mock
 import support as S
 from insertcoin.library import Library, year_range
 
@@ -204,6 +205,37 @@ class Screen(unittest.TestCase):
         self.assertEqual((app.in_results, app.kpos), (False, (1, 9)))
         self.press("right", "b")                                             # B also goes back to the keyboard
         self.assertEqual((app.screen_mode, app.in_results), ("search", False))
+
+    def test_y_stars_a_game_in_the_list(self):
+        app = self.app
+        self.press("a"); sid = app.sys["id"]                                 # opened from a system's games
+        self.press("search"); app.type_key("r")
+        app.kpos = (1, 9); self.press("right", "down")                       # Moon Raiders
+        g = app.preview[app.rsel]; was = app.lib.is_fav(g)
+        with mock.patch("subprocess.run", return_value=mock.Mock(returncode=1)):    # RetroArch isn't running
+            self.press("y")
+            self.assertEqual(app.lib.is_fav(g), not was)
+            self.assertEqual((app.screen_mode, app.in_results, app.preview[app.rsel]), ("search", True, g))
+            app.draw()                                                       # the star beside it
+            self.press("b", "b")                     # keyboard, then where it was opened (the Favorites tile came)
+            self.assertEqual((app.screen_mode, app.sys["id"]), ("games", sid))
+            self.press("search"); app.type_key("r"); app.kpos = (1, 9); self.press("right", "down")
+            self.press("y")
+        self.assertEqual(app.lib.is_fav(g), was)
+
+    def test_unstarring_from_a_search_opened_on_favorites(self):
+        app = self.app
+        with mock.patch("subprocess.run", return_value=mock.Mock(returncode=1)):
+            self.press("search"); app.type_key("r"); app.kpos = (1, 9); self.press("right", "down", "y")
+            self.press("b", "b")
+            app.si = next(i for i, s in enumerate(app.lib.systems) if s["id"] == "favorites"); app.screen_mode = "systems"
+            self.press("search"); app.type_key("r"); app.kpos = (1, 9)
+            self.press("right", "down", "y")                                     # the only favorite: the tile goes
+        self.assertEqual((app.screen_mode, app.in_results), ("search", True))    # still searching
+        self.assertNotIn("favorites", [s["id"] for s in app.lib.systems])
+        self.press("b", "b")
+        self.assertEqual(app.screen_mode, "systems")
+        self.assertLess(app.si, len(app.lib.systems))
 
     def test_start_opens_the_full_list_at_the_chosen_game(self):
         app = self.app

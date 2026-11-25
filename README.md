@@ -138,8 +138,9 @@ back. From the results, **B** returns to the keyboard with your words still ther
 
 The games found are listed beside the keyboard as you type. Press **right** at the keyboard's
 right edge to move onto that list: up and down choose a game, **LB / RB** page through it, **A**
-plays the chosen game, **Start** opens it in the full results list (box art, versions, favorites),
-and **left** or **B** goes back to the keyboard.
+plays the chosen game, **Y** adds it to (or removes it from) Favorites (a star marks your favorites in
+the list), **Start** opens it in the full results list (box art, versions), and **left** or **B** goes
+back to the keyboard.
 
 **The menu** (**B** on the home screen):
 

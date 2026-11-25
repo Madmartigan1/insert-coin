@@ -266,11 +266,14 @@ class Screens:
             yy = py + 70 + k * 74
             on = sel and top + k == self.rsel
             if on: rrect(self.screen, (236, 238, 245), pygame.Rect(px - 18, yy - 8, 640, 70), 14)
-            text(self.screen, self.fonts(28, True), g.title, (px, yy), (20, 22, 30) if on else (255, 255, 255), maxw=600, shadow=not on)
+            fav = self.lib.is_fav(g)
+            if fav: star(self.screen, (px + 584, yy + 18), 16)
+            text(self.screen, self.fonts(28, True), g.title, (px, yy), (20, 22, 30) if on else (255, 255, 255),
+                 maxw=560 if fav else 600, shadow=not on)
             sysname = FRIENDLY.get(g.system, (g.system,))[0]
             text(self.screen, self.fonts(22), sysname, (px, yy + 36), (80, 85, 105) if on else (175, 180, 200), maxw=600, shadow=not on)
         if n > top + rows: text(self.screen, self.fonts(24), f"and {n - top - rows:,} more", (px, py + 70 + rows * 74), (175, 180, 200))
-        if sel: self.draw_hints([("a", "Play"), ("lbrb", "Page"), ("b", "Keyboard")])
+        if sel: self.draw_hints([("a", "Play"), ("y", "Favorite"), ("lbrb", "Page"), ("b", "Keyboard")])
         else: self.draw_hints([("a", "Search"), ("b", "Back")] if kb else
                               [("a", "Type"), ("x", "Delete"), ("y", "Space"), ("b", "Back")])
 

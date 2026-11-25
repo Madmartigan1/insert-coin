@@ -252,14 +252,15 @@ class App(Pads, Launcher, Screens):
     RESULT_ROWS = 9                                     # games shown at once beside the keyboard
 
     def results_press(self, act):
-        """On the list of games beside the keyboard: move, page with LB / RB, A plays, Start opens the full list
-        (box art, versions, favorites) at that game, Left or B goes back to the keyboard."""
+        """On the list of games beside the keyboard: move, page with LB / RB, A plays, Y stars it as a favorite,
+        Start opens the full list (box art, versions) at that game, Left or B goes back to the keyboard."""
         n = len(self.preview)
         if act in ("up", "down", "lb", "rb"):
             step = {"up": -1, "down": 1, "lb": -self.RESULT_ROWS, "rb": self.RESULT_ROWS}[act]
             new = max(0, min(n - 1, self.rsel + step))
             if new != self.rsel: self.rsel = new; self.sfx.play("move")
         elif act == "a": self.launch(self.preview[self.rsel])
+        elif act == "y": self.favorite(self.preview[self.rsel])
         elif act == "start": self.run_search(at=self.rsel)
         elif act in ("left", "b"): self.in_results = False; self.sfx.play("back")
 
@@ -286,17 +287,23 @@ class App(Pads, Launcher, Screens):
         elif self.screen_mode == "systems": self.screen_mode = "quit"; self.quit_sel = 0; self.sfx.play("menu")
         else: self.screen_mode = "systems"; self.sfx.play("back")
 
-    def favorite(self):
-        g = self.cur_game() if self.screen_mode == "games" else None
+    def favorite(self, g=None):
+        """Star or unstar a game: the one given (search results beside the keyboard), else the chosen one."""
+        g = g or (self.cur_game() if self.screen_mode == "games" else None)
         if not g: return
         if not isinstance(g, WebGame) and subprocess.run(["pgrep", "-x", "retroarch"], capture_output=True).returncode == 0:
             self.err("Close RetroArch first to change favorites"); return
         added = self.lib.toggle_favorite(g)
         self.sfx.play("fav_on" if added else "fav_off")
         self.say(("Added to Favorites: " if added else "Removed from Favorites: ") + g.title)
-        sid = self.sys["id"]; self.lib.refresh_specials()
-        self.si = next((i for i, s in enumerate(self.lib.systems) if s["id"] == sid), 0)
-        if self.sys["id"] != sid: self.screen_mode = "systems"
+        sid = self.sys["id"]; bi, bmode = self.back_to
+        back_id = self.lib.systems[bi]["id"] if bi < len(self.lib.systems) else None
+        self.lib.refresh_specials()                                  # the Favorites tile may come or go: find them again
+        where = lambda i: next((k for k, s in enumerate(self.lib.systems) if s["id"] == i), None)
+        self.si = where(sid) or 0
+        if self.screen_mode == "search":                             # stay on the search screen; B goes back as before
+            k = where(back_id); self.back_to = (k, bmode) if k is not None else (0, "systems")
+        elif self.sys["id"] != sid: self.screen_mode = "systems"
 
     # -- input handling with key repeat
     REPEAT_FIRST, REPEAT = 0.32, 0.075
