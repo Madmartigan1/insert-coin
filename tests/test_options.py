@@ -44,3 +44,33 @@ class Options(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ProgressLine(unittest.TestCase):
+    """The progress line of --cores, --scan, --scan --add and --copy-art leaves nothing behind."""
+    @staticmethod
+    def screen(text):
+        """What a terminal shows for this output: carriage return goes back to the start of the line."""
+        lines = []
+        for raw in text.split("\n"):
+            row = []
+            for part in raw.split("\r"):
+                row[:len(part)] = part
+            lines.append("".join(row).rstrip())
+        return lines
+
+    def test_a_shorter_line_after_a_longer_one(self):
+        import io
+        from insertcoin.app import Progress
+        out = io.StringIO(); p = Progress(out)
+        p.show("  15 of 15: mupen64plus_next_libretro.so"); p.show("  1 of 2: x.so")
+        self.assertEqual(self.screen(out.getvalue()), ["  1 of 2: x.so"])
+        p.clear(); print("Copied from RetroArch: 1", end="", file=out)
+        self.assertEqual(self.screen(out.getvalue()), ["Copied from RetroArch: 1"])
+
+    def test_keep_leaves_the_last_count_as_a_record(self):
+        import io
+        from insertcoin.app import Progress
+        out = io.StringIO(); p = Progress(out)
+        p.show("  copied 9 of 10..."); p.show("  copied 10 of 10..."); p.keep(); print("Checking", file=out, end="")
+        self.assertEqual(self.screen(out.getvalue()), ["  copied 10 of 10...", "Checking"])

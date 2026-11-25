@@ -442,6 +442,24 @@ def check_options(a):
     return None
 
 
+
+class Progress:
+    """A progress line in the terminal that updates in place. Shorter text is padded so nothing of a longer
+    earlier line is left behind, and clear() wipes it before the results are printed."""
+    def __init__(self, out=None): self.width, self.out = 0, out
+
+    def _print(self, text): print(text, end="", flush=True, file=self.out)
+
+    def show(self, text):
+        self._print("\r" + text.ljust(self.width)); self.width = max(self.width, len(text))
+
+    def clear(self):
+        if self.width: self._print("\r" + " " * self.width + "\r"); self.width = 0
+
+    def keep(self):
+        """Leave the last progress text on screen as a record and go on below it."""
+        if self.width: self._print("\n"); self.width = 0
+
 def main():
     a = sys.argv[1:]
     problem = check_options(a)
@@ -469,28 +487,32 @@ def main():
         if need > free * 0.9:
             print(f"Not enough free space: the copy needs {need / 1e9:.1f} GB and {free / 1e9:.1f} GB is free. Nothing was copied."); return
         print(f"Copying {len(files):,} pictures ({need / 1e9:.1f} GB to copy) into {THUMBNAILS}...")
-        bar = lambda what: (lambda n, t: print(f"  {what} {n:,} of {t:,}..." + " " * 10, end="\r", flush=True))
+        line = Progress()
+        bar = lambda what: (lambda n, t: line.show(f"  {what} {n:,} of {t:,}..."))
         copied, kept, failed = artwork.copy(progress=bar("copied"))
-        print("\nChecking every picture byte for byte...")
+        line.keep(); print("Checking every picture byte for byte...")
         problems = artwork.verify(progress=bar("checked"))
-        print("\nChecking every game's pictures in both folders...")
+        line.keep(); print("Checking every game's pictures in both folders...")
         print(artwork.summary(copied, kept, failed, problems, artwork.coverage(artwork.library_games())))
         return
     if "--cores" in a:                   # copy (or download) the built-in player's cores into Insert Coin's folder
         from insertcoin import coreinstall
         print("Putting the built-in player's cores in Insert Coin's own folder (each one is test-loaded first)...")
-        print(coreinstall.summary(coreinstall.install(progress=lambda n, t, f: print(f"  {n} of {t}: {f}" + " " * 20, end="\r", flush=True))))
+        line = Progress()
+        results = coreinstall.install(progress=lambda n, t, f: line.show(f"  {n} of {t}: {f}"))
+        line.clear(); print(coreinstall.summary(results))
         return
     if "--scan" in a:                    # report what a scan finds (changes nothing); with --add, test-start and add them
         from insertcoin.scanner import scan, summary
         print("Scanning your game folders (the first scan reads every archive's index; later ones only what changed)...")
-        report = scan(progress=lambda n: print(f"  {n:,} files...", end="\r", flush=True))
-        print(summary(report))
+        line = Progress()
+        report = scan(progress=lambda n: line.show(f"  {n:,} files..."))
+        line.clear(); print(summary(report))
         if "--add" in a:
             from insertcoin import adding
             print("\nTest-starting the games found (60 seconds of game time each, no window or sound)...")
-            print(adding.summary(adding.add_found(report, retry="--retry" in a,
-                                                    progress=lambda n, t: print(f"  {n:,} of {t:,}...", end="\r", flush=True))))
+            result = adding.add_found(report, retry="--retry" in a, progress=lambda n, t: line.show(f"  {n:,} of {t:,}..."))
+            line.clear(); print(adding.summary(result))
         return
     try:
         App(windowed="--windowed" in a, shot=shot).run()
