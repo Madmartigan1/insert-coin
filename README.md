@@ -534,7 +534,8 @@ When Insert Coin starts with no games, it sets itself up, all on the controller:
    about X MB*).
 4. **Ready.** The games that need a test start (unrecognised files, arcade sets) are tested in the background
    while you play; the home screen shows how far it has got, and they appear when it's done. Box art downloads
-   in the background too. Closing Insert Coin doesn't stop it.
+   in the background too. Closing Insert Coin doesn't stop it. Forgot a folder? **B** goes back to the folder
+   list to add it.
 
 Run it again at any time from the B menu: **Find games** (for example after copying games to a new folder).
 

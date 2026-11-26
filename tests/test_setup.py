@@ -92,10 +92,12 @@ class Steps(unittest.TestCase):
             self.assertEqual(setup.add_recognised(self.report()), 1)
             more = self.report(); more["systems"][NES]["new"] = [{"path": S.rom("nes/Comet Dash (USA).nes"), "name": "Comet Dash (USA)"}]
             self.assertEqual(setup.add_recognised(more), 0)                               # not empty now: background
+            labels = [g["label"] for s in S.read(paths.LIBRARY)["systems"] for g in s["games"]]
+            self.assertEqual(labels, ["Star Pilot (USA)"])
+            self.assertEqual(setup.to_test(self.report()), 2)                             # the one added isn't counted
+            with mock.patch.object(adding, "recognised", lambda r: {S.rom("nes/Comet Dash (USA).nes")}):
+                self.assertEqual(setup.add_recognised(more, fresh=True), 1)               # the library this setup made
         self.assertEqual(starts, [])                                                       # nothing was test-started
-        self.assertEqual(setup.to_test(self.report()), 2)                                 # the one added isn't counted
-        labels = [g["label"] for s in S.read(paths.LIBRARY)["systems"] for g in s["games"]]
-        self.assertEqual(labels, ["Star Pilot (USA)"])
 
     def test_with_retroarch_and_no_library_everything_waits_for_the_background(self):
         S.sample_library()
@@ -188,7 +190,7 @@ class PadScreens(unittest.TestCase):
         app.draw()
         found = [(f"{S.TMP}/a", 70, True), (f"{S.TMP}/b", 7, False)]
         started = []
-        def add(report, p=None):
+        def add(report, p=None, fresh=False):
             S.write(paths.LIBRARY, {"version": 1, "systems": [{"name": NES, "default_core": S.core("mesen_libretro.so"),
                     "games": [{"label": "Star Pilot (USA)", "path": S.rom("nes/Star Pilot (USA).nes"), "core": None,
                                "db": f"{NES}.lpl"}]}]})
@@ -229,6 +231,30 @@ class PadScreens(unittest.TestCase):
         with mock.patch.object(setup, "find_game_folders", return_value=[]):
             self.press("a")
         self.assertEqual(app.fr["page"], "nofolders")
+
+    def test_back_from_ready_to_add_a_forgotten_folder(self):
+        app = self.app; calls = []
+        found = [(f"{S.TMP}/a", 70, True), (f"{S.TMP}/b", 7, False)]
+        def add(report, p=None, fresh=False):
+            calls.append(fresh); return 10 if len(calls) == 1 else 5
+        empty = {"systems": {NES: {"listed": 0, "new": [], "by_type": [], "copies": [], "not_games": []}}}
+        with mock.patch.object(setup, "find_game_folders", return_value=found), \
+             mock.patch.object(setup, "get_databases", lambda p=None: (True, "")), \
+             mock.patch.object(setup, "get_cores", lambda p=None: (True, "")), \
+             mock.patch.object(setup, "get_bios", lambda f, p=None: (True, "")), \
+             mock.patch.object(setup, "find_games", lambda f, p=None: empty), \
+             mock.patch.object(setup, "library_is_empty", side_effect=[True, False]), \
+             mock.patch.object(setup, "add_recognised", add), mock.patch.object(setup, "to_test", lambda r: 0), \
+             mock.patch.object(setup, "art_estimate", lambda: (0, 0)):
+            self.press("a", "down", "down", "down", "a")                               # Continue with the first folder
+            self.assertEqual(app.fr["page"], "done")
+            self.press("b")                                                            # forgot one: back to the list
+            self.assertEqual((app.fr["page"], app.fr["sel"]), ("folders", 2))          # on Choose another folder…
+            self.press("up", "a", "down", "down", "a")                                 # tick the second, Continue
+            self.assertEqual(app.fr["folders"], [f"{S.TMP}/a", f"{S.TMP}/b"])
+            self.assertEqual(app.fr["page"], "done")
+        self.assertEqual(calls, [True, True])               # the library this setup made still takes recognised games
+        self.assertEqual(app.fr["added"], 15)
 
     def to_row(self, name):
         """Move the browser's selection onto a folder's row."""

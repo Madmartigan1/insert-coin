@@ -149,9 +149,10 @@ def sandbox():
     return tmp, env
 
 
-def add_found(report, starter=test_start, workers=None, progress=None, retry=False):
+def add_found(report, starter=test_start, workers=None, progress=None, retry=False, trust=False):
     """Test-start every candidate in the report, add those that start to library.json, list the rest. With retry,
-    games left out earlier for a black screen get up to RETRY_STARTS starts per core.
+    games left out earlier for a black screen get up to RETRY_STARTS starts per core. trust = recognised console
+    games go straight in even though the library has games (the setup that made it is adding another folder).
     Returns a summary: {"added": {system: n}, "not_added": [...], "tested": n, "retried": n, "backup": path or None}."""
     t0 = time.time()
     if not os.path.exists(LIBRARY):
@@ -160,7 +161,7 @@ def add_found(report, starter=test_start, workers=None, progress=None, retry=Fal
     if not isinstance(doc, dict) or not isinstance(doc.get("systems"), list):
         raise ValueError(f"{LIBRARY} couldn't be read: nothing was added")
     # a library built from scratch: recognised console games go straight in (see the top of this file)
-    trusted = recognised(report) if not any(s.get("games") for s in doc["systems"]) else set()
+    trusted = recognised(report) if trust or not any(s.get("games") for s in doc["systems"]) else set()
     defaults = {s["name"]: s.get("default_core") for s in doc["systems"]}
     have = {g["path"] for s in doc["systems"] for g in s.get("games", [])}
     todo = [c for c in candidates(report) if c[1] not in have]

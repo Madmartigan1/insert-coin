@@ -2,6 +2,7 @@
 `insert-coin --setup`, and runs in a thread so the screen keeps moving.
 
   welcome -> looking -> folders (or nofolders) -> working -> art (if the art server has pictures) -> done
+                                       ^-------------------------- B on done (a folder forgotten) -----'
                           folders / nofolders -> browse (choose a folder by hand) -> folders
 
 It opens by itself whenever the library has no games, and from the B menu ("Find games"). After it, the games
@@ -90,7 +91,9 @@ class FirstRun:
             return True, f"{n:,} games in {len(report['systems'])} systems"
         step("scan", scan)
         def add(p):
-            fr["quick"] = setup.add_recognised(report, p) if report else 0
+            fr["fresh"] = fr.get("fresh") or setup.library_is_empty()      # this setup makes the library
+            fr["quick"] = setup.add_recognised(report, p, fresh=fr["fresh"]) if report else 0
+            fr["added"] = fr.get("added", 0) + fr["quick"]
             fr["tests"] = setup.to_test(report) if report else 0
             setup.use_own_library()
             return True, f"{fr['quick']:,} added" + (f"; {fr['tests']:,} more to test-start" if fr["tests"] else "")
@@ -150,6 +153,8 @@ class FirstRun:
                 fr["want_art"] = act != "b"; fr["page"] = "done"; self.sfx.play("select" if act != "b" else "back")
         elif page == "done":
             if act in ("a", "go"): self.finish_firstrun()
+            elif act == "b":                                     # a folder forgotten: back to the list
+                fr["page"], fr["sel"] = "folders", len(fr["found"]); self.sfx.play("back")
 
     def leave_firstrun(self):
         if self.fr["from_menu"] or self.lib.systems: self.screen_mode = "systems"; self.sfx.play("back")
@@ -279,11 +284,11 @@ class FirstRun:
             self.draw_hints([("a", "Download"), ("b", "Not now")])
         elif page == "done":
             self.draw_header("Ready", "Set up")
-            games = fr["quick"]
+            games = fr.get("added", fr["quick"])
             mid("You're ready to play!", 330, 48, (255, 255, 255), True)
             mid(f"{games:,} games are in your library." if games else "Your library is ready.", 440)
             if fr["tests"]:
                 mid(f"{fr['tests']:,} more games are being test-started in the background;", 520)
                 mid("they appear as they pass, and you can play meanwhile.", 574)
             if fr.get("want_art"): mid("Box art downloads in the background too.", 654)
-            self.draw_hints([("a", "Let's play")])
+            self.draw_hints([("a", "Let's play"), ("b", "Back")])

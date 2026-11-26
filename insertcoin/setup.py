@@ -184,17 +184,18 @@ def to_test(report):
     return sum(1 for _, path, _ in candidates(report) if path not in have)
 
 
-def add_recognised(report, progress=None):
-    """Add the console games the databases recognise by checksum, without test starts (an empty library only;
-    otherwise everything is test-started in the background). Returns how many were added."""
+def add_recognised(report, progress=None, fresh=False):
+    """Add the console games the databases recognise by checksum, without test starts (an empty library only, or
+    fresh = a library this same setup has just made; otherwise everything is test-started in the background).
+    Returns how many were added."""
     from insertcoin import adding
     from paths import RA
-    if not library_is_empty(): return 0
+    if not fresh and not library_is_empty(): return 0
     if not os.path.exists(LIBRARY) and os.path.isdir(f"{RA}/playlists"): return 0     # it starts as RetroArch's games
     keep = adding.recognised(report)
     only = {"systems": {sy: dict(s, new=[x for x in s["new"] if x["path"] in keep], by_type=[])
                         for sy, s in report["systems"].items()}}
-    result = adding.add_found(only, progress=lambda n, t: progress and progress(f"{n:,} of {t:,}"))
+    result = adding.add_found(only, progress=lambda n, t: progress and progress(f"{n:,} of {t:,}"), trust=fresh)
     return sum(result["added"].values())
 
 
