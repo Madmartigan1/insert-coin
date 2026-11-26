@@ -168,9 +168,14 @@ def read_file(path):
 
 
 def walk(roots):
-    """Every zip, 7z or ROM-type file under the folders (hidden folders skipped), with its size and time."""
+    """Every zip, 7z or ROM-type file under the folders (hidden folders skipped), with its size and time. Linked
+    folders are followed (a games folder on another drive), each real folder once (no link loops)."""
+    visited = set()
     for root in roots:
-        for d, subs, files in os.walk(root):
+        for d, subs, files in os.walk(root, followlinks=True):
+            real = os.path.realpath(d)
+            if real in visited: subs[:] = []; continue
+            visited.add(real)
             subs[:] = sorted(s for s in subs if not s.startswith("."))
             for f in sorted(files):
                 ext = os.path.splitext(f)[1].lower()

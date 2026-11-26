@@ -122,6 +122,15 @@ class Scan(unittest.TestCase):
         r = scanner.scan(roots=[ROOT], dbs=self.dbs, listed=[])
         self.assertIn(f"{ROOT}/arcade/nosuch.zip", [x["path"] for x in r["systems"]["MAME 2003-Plus"]["by_type"]])
 
+    def test_linked_folders_are_followed_once(self):
+        other = f"{S.TMP}/other-drive"
+        import shutil; shutil.rmtree(other, ignore_errors=True)
+        os.makedirs(other); put("../other-drive/Wave Rider (USA).nes", COMET + b"wave")
+        os.symlink(other, f"{ROOT}/linked"); os.symlink(ROOT, f"{ROOT}/nes/loop")              # another drive; a loop
+        found = [p for p, _, _ in scanner.walk([ROOT])]
+        self.assertIn(f"{ROOT}/linked/Wave Rider (USA).nes", found)
+        self.assertEqual(len(found), len(set(os.path.realpath(p) for p in found)))           # nothing twice
+
     def test_changes_nothing_else(self):
         before = {p: os.path.getmtime(p) for p in (f"{S.RA}/playlists/{NES}.lpl", self.listed)}
         self.run_scan()

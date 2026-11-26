@@ -14,10 +14,11 @@ from insertcoin.draw import H, W
 from insertcoin.launch import Launcher
 from insertcoin.pads import Pads
 from insertcoin.screens import Screens
+from insertcoin.firstrun import FirstRun
 
 
 # ---------------------------------------------------------------- the app
-class App(Pads, Launcher, Screens):
+class App(Pads, Launcher, Screens, FirstRun):
     def __init__(self, windowed=False, shot=None):
         self.windowed, self.shot = windowed, shot
         pygame.mixer.pre_init(44100, -16, 2, 512)
@@ -52,8 +53,9 @@ class App(Pads, Launcher, Screens):
         self.hold = {}; self.quit_sel = 1; self.vlist = []; self.vsel = 0
         self.q = ""; self.kpos = (1, 0); self.preview = []; self.back_to = (self.si, "systems")   # the search screen
         self.in_results, self.rsel = False, 0          # the pad is on the list of games beside the keyboard, at rsel
-        self.clock = pygame.time.Clock()
+        self.clock = pygame.time.Clock(); self.bg = None
         if self.lib_note: self.say(self.library_message(), 4.0)
+        if not self.lib.systems and not shot: self.start_firstrun()      # no games yet: set up
 
     # -- display / input
     def open_display(self):
@@ -143,6 +145,7 @@ class App(Pads, Launcher, Screens):
             elif choice.startswith("Player"): self.toggle_engine()
             elif choice.startswith("Games"): self.toggle_grouping()
             elif choice.startswith("Library"): self.toggle_library()
+            elif choice == "Find games": self.sfx.play("select"); self.start_firstrun(from_menu=True)
             else: self.sfx.play("select"); self.setup_from_menu()
 
     def toggle_grouping(self):
@@ -309,7 +312,8 @@ class App(Pads, Launcher, Screens):
     REPEAT_FIRST, REPEAT = 0.32, 0.075
 
     def press(self, act):
-        if not self.lib.systems:                                    # empty setup: only "exit" does anything
+        if self.screen_mode == "firstrun": return self.firstrun_press(act)
+        if not self.lib.systems:                                    # no games and no setup screen: only "exit"
             if act == "b": self.running = False; log.info("Exit (no games found)")
             return
         if self.screen_mode == "search": return self.search_press(act)
@@ -413,7 +417,7 @@ class App(Pads, Launcher, Screens):
         self.running = True
         while self.running:
             for e in pygame.event.get(): self.handle(e)
-            self.tick_repeat(); self.draw(); pygame.display.flip(); self.clock.tick(60)
+            self.tick_repeat(); self.poll_background(); self.draw(); pygame.display.flip(); self.clock.tick(60)
         pygame.quit()
 
 
@@ -425,6 +429,8 @@ With no option it opens Insert Coin (full screen).
 
 Options:
   --windowed             open it in a window instead
+  --setup [FOLDER]       set up Insert Coin in the terminal: find the folders with your games (or use the ones
+                         named), get the game databases, cores and BIOS files, and build the library
   --scan [FOLDER]        look through your game folders and report games not listed yet (changes nothing);
                          name the folder that holds your games when the library has none yet
   --scan --add           test-start the games found and add those that start to Insert Coin's library
@@ -437,7 +443,7 @@ Options:
   --help, -h             show this help
 
 More: https://github.com/Madmartigan1/insert-coin#usage"""
-OPTIONS = {"--windowed", "--scan", "--add", "--retry", "--cores", "--databases", "--bios", "--copy-art", "--shot", "--help", "-h"}
+OPTIONS = {"--windowed", "--setup", "--finish-setup", "--scan", "--add", "--retry", "--cores", "--databases", "--bios", "--copy-art", "--shot", "--help", "-h"}
 
 
 def check_options(a):
@@ -446,7 +452,7 @@ def check_options(a):
     if "--help" in a or "-h" in a: return USAGE.format(version=__version__), 0
     rest = a[:a.index("--shot")] + a[a.index("--shot") + 2:] if "--shot" in a else a
     if "--shot" in a and len(a) <= a.index("--shot") + 1: return "insert-coin: --shot needs a folder\nTry: insert-coin --help", 2
-    folders = [o for o in rest if not o.startswith("-")] if "--scan" in rest else []
+    folders = [o for o in rest if not o.startswith("-")] if {"--scan", "--setup", "--finish-setup"} & set(rest) else []
     missing = [f for f in folders if not os.path.isdir(os.path.expanduser(f))]
     if missing: return f"insert-coin: no such folder: {missing[0]}\nTry: insert-coin --help", 2
     unknown = [o for o in rest if o not in OPTIONS and o not in folders]
@@ -484,6 +490,14 @@ def main():
     shot = a[a.index("--shot") + 1] if "--shot" in a else None
     if shot: os.environ["SDL_VIDEODRIVER"] = "dummy"; os.environ["SDL_AUDIODRIVER"] = "dummy"
     if not shot: start_log()
+    folders = [os.path.abspath(os.path.expanduser(o)) for o in a if not o.startswith("-")]
+    if "--setup" in a:                   # the whole setup in the terminal
+        from insertcoin import setup
+        raise SystemExit(setup.terminal(folders))
+    if "--finish-setup" in a:            # the setup's background run (started by the pad setup; not for typing)
+        from insertcoin import setup
+        setup.finish(folders, art=os.environ.get("INSERT_COIN_SETUP_ART") == "1", out=sys.stdout)
+        return
     if "--bios" in a:                    # Insert Coin's own BIOS folder, and what's in it
         from insertcoin import bios
         copied, created = bios.set_up_own()
@@ -530,7 +544,6 @@ def main():
         return
     if "--scan" in a:                    # report what a scan finds (changes nothing); with --add, test-start and add them
         from insertcoin.scanner import default_roots, listed_games, scan, summary
-        folders = [os.path.abspath(os.path.expanduser(o)) for o in a if not o.startswith("-")]
         if not folders and not default_roots([p for _, p in listed_games()]):
             print("Your library has no games yet, so Insert Coin doesn't know where to look. Name the folder that holds\n"
                   "your games, for example:  insert-coin --scan --add ~/Games"); raise SystemExit(2)

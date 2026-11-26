@@ -120,7 +120,8 @@ class Launch(unittest.TestCase):
             with zipfile.ZipFile(path, "w") as z: z.writestr("Comet Run.sfc", rom(0x03))
             with mock.patch.object(launch, "chip_core", return_value=chip_answer), \
                  mock.patch.object(launch.subprocess, "run", side_effect=fake_run), \
-                 mock.patch.object(launch.pygame.display, "quit"):
+                 mock.patch.object(launch.pygame.display, "quit"), \
+                 mock.patch.object(launch, "retroarch_installed", return_value=True):     # a computer with RetroArch
                 Stub().launch(Game("Comet Run", path + "#Comet Run.sfc", MESEN_S, "Nintendo - Super Nintendo Entertainment System"))
         return calls[0]
 

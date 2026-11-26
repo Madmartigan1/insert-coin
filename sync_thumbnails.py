@@ -11,11 +11,19 @@ Looks up each playlist entry's label on thumbnails.libretro.com: exact name firs
 then a fuzzy match ignoring (tags)/[tags]/punctuation, preferring the same region.
 Only fills in missing images; never overwrites existing ones. MAME* playlists use
 the shared "MAME" thumbnail folder, like RetroArch does.
+
+When thumbnails.libretro.com doesn't answer with its file lists (it returned empty pages and 404s on
+2026-11-25), the same pictures come from the libretro-thumbnails repositories on GitHub
+(https://github.com/libretro-thumbnails), which the server is built from: one request per system for the
+file list (GitHub allows 60 an hour without an account), the pictures from raw.githubusercontent.com.
 """
 import json, os, re, sys, glob, html, urllib.parse, urllib.request, concurrent.futures as cf
 import time
 from paths import LIBRARY, RA, RA_THUMBNAILS, THUMBNAILS, THUMB_SYNC_CACHE as S
 BASE = "https://thumbnails.libretro.com"; TYPES = ["Named_Boxarts", "Named_Snaps", "Named_Titles"]
+GH_API = "https://api.github.com/repos/libretro-thumbnails/{repo}/git/trees/master?recursive=1"
+GH_RAW = "https://raw.githubusercontent.com/libretro-thumbnails/{repo}/master/{t}/{name}.png"
+SOURCE = {}                                           # (system, type) -> "server" or "github": where its pictures come from
 DRY = "--dry" in sys.argv
 os.makedirs(f"{S}/idx", exist_ok=True)
 def get(url):
@@ -30,14 +38,39 @@ def key(s):
 UNIT = {"K": 1e3, "M": 1e6, "G": 1e9}
 def index(system, t):
     cache = f"{S}/idx/{sanitize(system)}__{t}.json"
-    if os.path.exists(cache) and time.time() - os.path.getmtime(cache) < 7 * 86400: return json.load(open(cache))
-    try: page = get(f"{BASE}/{urllib.parse.quote(system)}/{t}/").decode("utf-8", "replace")
-    except Exception as e: print("  no index", system, t, e); return {}
+    if os.path.exists(cache) and time.time() - os.path.getmtime(cache) < 7 * 86400:
+        got = json.load(open(cache))
+        if set(got) == {"source", "files"}: SOURCE[(system, t)] = got["source"]; return got["files"]
+        SOURCE[(system, t)] = "server"; return got                     # a list saved before 0.8.3: the server's
     out = {}
-    for href, size in re.findall(r'<a href="([^"?/][^"]*\.png)">.*?</a></td><td[^>]*>[^<]*</td><td[^>]*>\s*([\d.]+[KMG]?)', page):
-        name = html.unescape(urllib.parse.unquote(href))[:-4]
-        out[name] = float(size[:-1]) * UNIT[size[-1]] if size[-1] in UNIT else float(size)
-    json.dump(out, open(cache, "w")); return out
+    try:
+        page = get(f"{BASE}/{urllib.parse.quote(system)}/{t}/").decode("utf-8", "replace")
+        for href, size in re.findall(r'<a href="([^"?/][^"]*\.png)">.*?</a></td><td[^>]*>[^<]*</td><td[^>]*>\s*([\d.]+[KMG]?)', page):
+            name = html.unescape(urllib.parse.unquote(href))[:-4]
+            out[name] = float(size[:-1]) * UNIT[size[-1]] if size[-1] in UNIT else float(size)
+    except Exception as e: print("  no list from the art server:", system, t, e)
+    source = "server"
+    if not out:                                       # the server didn't answer: GitHub has the same pictures
+        out, source = github_index(system, t), "github"
+    SOURCE[(system, t)] = source
+    if out: json.dump({"source": source, "files": out}, open(cache, "w"))
+    return out
+def github_index(system, t):
+    """{picture name: bytes} for one system and type from the libretro-thumbnails repository on GitHub (the whole
+    repository's file list is fetched once and cached)."""
+    repo = system.replace(" ", "_")
+    cache = f"{S}/idx/github__{sanitize(repo)}.json"
+    if os.path.exists(cache) and time.time() - os.path.getmtime(cache) < 7 * 86400: tree = json.load(open(cache))
+    else:
+        try: tree = json.loads(get(GH_API.format(repo=urllib.parse.quote(repo))))["tree"]
+        except Exception as e: print("  no list on GitHub either:", system, e); return {}
+        tree = [[x["path"], x.get("size", 0)] for x in tree if x.get("type") == "blob" and x["path"].endswith(".png")]
+        json.dump(tree, open(cache, "w"))
+    return {p[len(t) + 1:-4]: size for p, size in tree if p.startswith(t + "/")}
+def picture_url(system, t, name):
+    if SOURCE.get((system, t)) == "github":
+        return GH_RAW.format(repo=urllib.parse.quote(system.replace(" ", "_")), t=t, name=urllib.parse.quote(name))
+    return f"{BASE}/{urllib.parse.quote(system)}/{t}/{urllib.parse.quote(name)}.png"
 BAD = re.compile(r"\((?:[^)]*\b(?:Demo|Beta|Proto|Sample|Kiosk|Hack|Pirate)\b[^)]*)\)", re.I)
 def rank(n, label=""):
     lab = re.search(r"\b(USA|World|Europe|Japan|Brazil|Korea|Asia)\b", label)
@@ -81,7 +114,7 @@ for db, label in games():
         elif km.get(key(it["label"])): src = sorted(km[key(it["label"])], key=lambda n: rank(n, it["label"]))[0]; st["fuzzy"] += 1
         else: st["none"] += 1; continue
         if any(j[1] == local for j in jobs): continue
-        st["bytes"] += idx[src]; jobs.append((f"{BASE}/{urllib.parse.quote(system)}/{t}/{urllib.parse.quote(src)}.png", local))
+        st["bytes"] += idx[src]; jobs.append((picture_url(system, t, src), local))
 for k, v in stats.items(): print(f"{k:50} have {v['have']:5}  exact {v['exact']:5}  fuzzy {v['fuzzy']:5}  not-on-server {v['none']:5}  ~{v['bytes']/1e6:.0f} MB")
 print("TOTAL downloads:", len(jobs), f"~{sum(v['bytes'] for v in stats.values())/1e6:.0f} MB")
 if DRY: sys.exit()
@@ -89,6 +122,9 @@ def dl(j):
     url, local = j
     try:
         data = get(url); os.makedirs(os.path.dirname(local), exist_ok=True)
+        if not data.startswith(b"\x89PNG") and len(data) < 400 and data.strip().endswith(b".png") and "githubusercontent" in url:
+            target = data.decode("utf-8", "replace").strip()           # a link in the repository: the same picture
+            data = get(urllib.parse.urljoin(url, urllib.parse.quote(target)))
         if not data.startswith(b"\x89PNG"): return "notpng"
         tmp = local + ".part"; open(tmp, "wb").write(data); os.replace(tmp, local); return "ok"
     except Exception as e: return "err"

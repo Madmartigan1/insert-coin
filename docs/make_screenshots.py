@@ -190,6 +190,18 @@ def main():
     app.raw[1] = None
     app.start_setup(1, name="USB Gamepad", guid="demo", baseline={})
     app.setup["step"] = 4; save("controller_setup")
+    # first-run setup: the folders found, then the steps (fictional folders)
+    from paths import HOME as DEMO_HOME
+    app.setup = None; app.start_firstrun()
+    app.fr.update(page="folders", found=[(f"{DEMO_HOME}/Games", 4210, True), ("/media/player/USB Drive/Retro", 1388, True),
+                                         (f"{DEMO_HOME}/Downloads", 12, False)], pick={0, 1}, sel=1)
+    save("setup_folders")
+    app.fr.update(page="working", line="1,240 of 4,210", steps=[
+        ["databases", "Game databases", "done", "151 downloaded"], ["cores", "Emulator cores", "done", "16 ready"],
+        ["bios", "BIOS files", "done", "2 files (2 found with your games)"],
+        ["scan", "Finding your games", "done", "5,598 games in 9 systems"],
+        ["add", "Adding the games the databases recognise", "running", ""], ["art", "Box art", "waiting", ""]])
+    save("setup_working")
     # the button-hint bar in each controller style
     app.setup = None; go_system("Pixel Forge - 16-Bit Console"); app.screen_mode = "games"
     W, H = app.screen.get_size(); strips = []

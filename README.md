@@ -106,7 +106,7 @@ vice versa.
 | **Home** — every system, plus Search, Favorites and Recently Played | **Favorites** — press Y on any game |
 | ![The Versions list: one game in five versions, the best one first](docs/screenshots/versions.png) | ![The built-in player's pause menu: Resume, Save state, Load state, Picture, Controls, Quit game](docs/screenshots/game_menu.png) |
 | **Versions** — X on a game with more than one | **Game menu** — Select + Start in the built-in player |
-| ![The built-in player's Controls screen: each game button with the controller button that does it](docs/screenshots/game_controls.png) | ![The menu: Resume, Sound, Player, Games, Set up controller, Exit Insert Coin](docs/screenshots/menu.png) |
+| ![The built-in player's Controls screen: each game button with the controller button that does it](docs/screenshots/game_controls.png) | ![The menu: Resume, Sound, Player, Games, Library, Find games, Set up controller, Exit Insert Coin](docs/screenshots/menu.png) |
 | **Controls** — this game's buttons, in the built-in player | **Menu** — B on the home screen |
 | ![Search: an on-screen keyboard, with the matching games listed as you type](docs/screenshots/search.png) | ![Controller set-up: press the button you want for each action](docs/screenshots/controller_setup.png) |
 | **Search** — R3, or the Search tile on the home screen | **Controller set-up** — for pads that aren't recognised |
@@ -151,6 +151,7 @@ back to the keyboard.
 | **Player: RetroArch / Built-in (beta)** | Which program plays your games — see [Built-in player](#built-in-player-beta) |
 | **Games: One per game / Show all** | Group copies and versions of a game into one entry, or list every ROM |
 | **Library: RetroArch / Insert Coin (beta)** | Where the list of games comes from: RetroArch's playlists, or Insert Coin's own library. The first time you choose Insert Coin, it copies your RetroArch playlists into its own library (a second or so); after that it reads its own copy. Same games, versions and box art either way. Insert Coin's library keeps its own Favorites and Recently Played too (copied from RetroArch's the first time), and every change is also written to RetroArch's, so switching back shows the same lists. If Insert Coin's library can't be read, it shows RetroArch's playlists and says so. Without RetroArch, Insert Coin's own library is used (see [Without RetroArch](#without-retroarch)) |
+| **Find games** | Run the setup again: look for folders with games and add what's new (see [Setting up](#setting-up-first-run)) |
 | **Set up controller** | Redo the button set-up for an unrecognised pad |
 | **Exit Insert Coin** | Close Insert Coin |
 
@@ -447,7 +448,8 @@ RetroArch's thumbnails folder: a game's picture is taken from Insert Coin's fold
 RetroArch's. `sync_thumbnails.py` fills in whatever is missing for
 **all** your playlists in one go, and for the games in Insert Coin's own library (such as those
 added by `--scan --add`), from `thumbnails.libretro.com` — the same source RetroArch's built-in
-updater uses.
+updater uses. When that server doesn't answer, the same pictures come from the libretro-thumbnails
+repositories on GitHub, which the server is built from.
 
 - Tries the exact game name first, then a careful fuzzy match that ignores tags such as
   `(USA)` or `[!]` and prefers the same region as your copy.
@@ -483,6 +485,7 @@ Start **Insert Coin** from your applications menu, or run:
 | Option | Effect |
 |---|---|
 | `--windowed` | Run in a window instead of fullscreen — games too (handy for testing next to a terminal) |
+| `--setup [FOLDER]` | Set up Insert Coin in the terminal: find the folders with your games (or use the ones named), get the databases, cores and BIOS files, build the library and offer box art; see [Setting up](#setting-up-first-run) |
 | `--shot DIR` | Render sample screens to PNG files in `DIR` and exit — no display needed (for testing) |
 | `--bios` | Check the BIOS files the built-in player's cores can use, and give Insert Coin its own BIOS folder (a copy of RetroArch's); see below |
 | `--copy-art` | Copy RetroArch's box art into Insert Coin's own art folder and check every picture and every game; see [Copying RetroArch's art](#copying-retroarchs-art---copy-art) |
@@ -511,11 +514,39 @@ steps 3 and 4.
 Since 0.8 `--scan --add` test-starts and adds Nintendo 64 games too (run `--cores` first, so the N64 core is
 installed).
 
+### Setting up (first run)
+
+When Insert Coin starts with no games, it sets itself up, all on the controller:
+
+| | |
+|---|---|
+| ![Setup: the folders with game files, two of three ticked, and Continue](docs/screenshots/setup_folders.png) | ![Setup: databases, cores, BIOS and the scan done, adding the recognised games](docs/screenshots/setup_working.png) |
+
+1. **Where are your games?** It looks through your home folder and plugged-in drives (linked folders too) for
+   game files, and lists the folders that hold them, with how many game files each has. The likely ones are
+   ticked; **A** ticks or unticks a folder, **Continue** goes on.
+2. **Getting everything ready:** the game databases, the emulator cores and the BIOS folder (BIOS files lying
+   among your games are picked up too: only known good ones, never replacing one). Then it scans the folders
+   and adds every game the databases recognise by checksum, straight away.
+3. **Box art:** it asks the art server what it has for your games and asks before downloading (*N pictures,
+   about X MB*).
+4. **Ready.** The games that need a test start (unrecognised files, arcade sets) are tested in the background
+   while you play; the home screen shows how far it has got, and they appear when it's done. Box art downloads
+   in the background too. Closing Insert Coin doesn't stop it.
+
+Run it again at any time from the B menu: **Find games** (for example after copying games to a new folder).
+
+**From the terminal:** `insert-coin --setup` does the same in the terminal: it lists the folders it found as
+numbers to choose from (or name them: `insert-coin --setup ~/Games /media/me/USB`), shows each step, runs the
+test starts right there and asks about box art at the end. The single steps stay available on their own:
+`--databases`, `--cores`, `--bios`, `--scan --add FOLDER`, `--copy-art`.
+
 ### Without RetroArch
 
 Insert Coin no longer needs RetroArch to be installed. When it isn't (no `retroarch` program, or no
 `~/.config/retroarch/playlists`), Insert Coin starts with its own library (*Library: Insert Coin*) and plays
-every game in the built-in player, and it never creates anything in RetroArch's folders. To make the library:
+every game in the built-in player, and it never creates anything in RetroArch's folders. The library is made
+by the [setup](#setting-up-first-run) (on the pad, or `insert-coin --setup`), or step by step:
 
 1. `insert-coin --databases` (the game databases, so games can be recognised) and `insert-coin --cores` (the
    emulator cores).
@@ -642,6 +673,8 @@ can overwrite each other's settings.
 | `~/.local/share/insert-coin/cores/` | Insert Coin's own copies of the cores (`--cores`), and `cores.json`: where each came from, its version and checksum |
 | `~/.local/share/insert-coin/database/` | Insert Coin's own game databases (`--databases`): `rdb/*.rdb`, and `databases.json` (where and when they were downloaded, and the download's checksum) |
 | `~/.local/share/insert-coin/scan-not-added.json` | Games `--scan --add` found but didn't add, and why (nothing is deleted) |
+| `~/.local/state/insert-coin/setup-status.json` | How far the setup's background run (test starts, box art) has got |
+| `~/.local/state/insert-coin/setup-background.log` | What the setup's background run printed |
 | `~/.cache/insert-coin/test-starts.json` | The result of each test start, so later runs only test what is new or changed |
 | `~/.local/share/insert-coin/favorites.json`, `history.json` | Favorites and Recently Played for **Library: Insert Coin**, copied from RetroArch's the first time |
 | `~/.config/insert-coin/played.json` | Favorites and Recently Played for browser games, and the time of each game launch (to place them in Recently Played) |
@@ -732,7 +765,8 @@ own license:
   contributors (`.rdb` files, RetroArch's or downloaded by `--databases` from the libretro buildbot):
   checksums, years and publishers for the scanner and game info.
 - The [libretro thumbnails](https://github.com/libretro-thumbnails/libretro-thumbnails) project: box art,
-  title screens and snapshots downloaded by `sync_thumbnails.py`.
+  title screens and snapshots downloaded by `sync_thumbnails.py` (from thumbnails.libretro.com, or from the
+  project's repositories on GitHub when that server doesn't answer).
 - Game file headers (iNES, the SNES cartridge and copier headers, the Super Magic Drive interleave) are read as
   described in public community documentation such as the [NESdev](https://www.nesdev.org/wiki/) and
   [SNESdev](https://snes.nesdev.org/wiki/) wikis.

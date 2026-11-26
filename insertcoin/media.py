@@ -64,6 +64,10 @@ class Images:
         self.cache[key] = s; self.cache.move_to_end(key)
         while len(self.cache) > self.limit: self.cache.popitem(last=False)
 
+    def forget_missing(self):
+        """Forget the pictures that weren't there, so ones downloaded since are loaded."""
+        for k in [k for k, v in self.cache.items() if v is None]: del self.cache[k]
+
     def pump(self):
         n = 0
         while self.done and n < 12:

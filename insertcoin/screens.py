@@ -283,16 +283,16 @@ class Screens:
                 f"Player: {'Built-in (beta)' if self.settings.get('engine') else 'RetroArch'}",
                 f"Games: {'One per game' if self.settings['one_per_game'] else 'Show all'}",
                 f"Library: {'Insert Coin (beta)' if self.settings.get('library') == 'insertcoin' else 'RetroArch'}",
-                "Set up controller", "Exit Insert Coin")
+                "Find games", "Set up controller", "Exit Insert Coin")
 
     def draw_quit(self):
         self.draw_systems(hints=False)
         dim = pygame.Surface((W, H), pygame.SRCALPHA); dim.fill((0, 0, 0, 170)); self.screen.blit(dim, (0, 0))
-        box = pygame.Rect(0, 0, 640, 200 + 96 * len(self.POWER_MENU)); box.center = (W / 2, H / 2)
+        box = pygame.Rect(0, 0, 640, 180 + 86 * len(self.POWER_MENU)); box.center = (W / 2, H / 2 - 20)
         rrect(self.screen, (28, 30, 42), box, 28); rrect(self.screen, (90, 95, 115), box, 28, 3)
         text(self.screen, self.fonts(44, True), "Insert Coin", (W / 2, box.top + 48), anchor="midtop")
         for k, lbl in enumerate(self.POWER_MENU):
-            r = pygame.Rect(0, 0, 480, 76); r.center = (W / 2, box.top + 180 + k * 96)
+            r = pygame.Rect(0, 0, 480, 70); r.center = (W / 2, box.top + 165 + k * 86)
             on = self.quit_sel == k
             rrect(self.screen, (230, 232, 240) if on else (55, 58, 75), r, 20)
             text(self.screen, self.fonts(32, True), lbl, r.center, (20, 22, 30) if on else (230, 232, 240), anchor="center", shadow=False)
@@ -352,10 +352,13 @@ class Screens:
         self.img.pump()
         if self.screen_mode == "setup":
             return self.draw_setup()
+        if self.screen_mode == "firstrun":
+            return self.draw_firstrun()
         if not self.lib.systems:
             return self.draw_empty()
         {"systems": self.draw_systems, "games": self.draw_games, "quit": self.draw_quit,
          "versions": self.draw_versions, "search": self.draw_search}[self.screen_mode]()
+        self.draw_background_note()
         if self.toast and time.time() < self.toast[1]:
             f = self.fonts(30); w = f.size(self.toast[0])[0] + 60
             r = pygame.Rect(0, 0, w, 64); r.midtop = (W / 2, H - 150 if self.screen_mode in ("quit", "search") else 150)   # clear of the menu
