@@ -48,6 +48,21 @@ class FindingFolders(unittest.TestCase):
         self.assertIn("not a number", setup.choose_folders(found, "9")[1])
 
 
+class ByHand(unittest.TestCase):
+    def test_disks_under_mnt_are_looked_through(self):
+        S.reset()
+        disk = f"{S.TMP}/mnt-here"; os.makedirs(f"{disk}/games-disk", exist_ok=True)
+        real = os.scandir
+        with mock.patch("os.scandir", lambda p: real(disk if p == "/mnt" else p)):
+            self.assertIn(f"{disk}/games-disk", setup.drives())
+
+    def test_counting_a_folder(self):
+        S.reset()
+        c = f"{S.TMP}/count"
+        files(c, ["a.nes", "b.zip", "notes.txt"]); files(f"{c}/sub", ["c.sfc"]); files(f"{c}/.hidden", ["d.nes"])
+        self.assertEqual(setup.count_game_files(f"{S.TMP}/count"), 3)
+
+
 class Steps(unittest.TestCase):
     def setUp(self):
         S.reset(); shutil.rmtree(bios.OWN_SYSTEM, ignore_errors=True)
@@ -189,7 +204,7 @@ class PadScreens(unittest.TestCase):
             self.press("a")
             self.assertEqual((app.fr["page"], app.fr["pick"]), ("folders", {0}))     # the likely one is ticked
             self.press("down", "a", "up", "a")                                         # tick the second, untick the first
-            self.press("down", "down", "a")                                            # Continue
+            self.press("down", "down", "down", "a")                                    # past Choose another folder: Continue
             self.assertEqual(app.fr["folders"], [f"{S.TMP}/b"])
             self.assertEqual(app.fr["page"], "art")
             steps = {k: (st, note) for k, _, st, note in app.fr["steps"]}
@@ -206,7 +221,7 @@ class PadScreens(unittest.TestCase):
     def test_nothing_ticked_and_no_folders(self):
         app = self.app
         with mock.patch.object(setup, "find_game_folders", return_value=[(f"{S.TMP}/b", 7, False)]):
-            self.press("a", "down", "a")
+            self.press("a", "down", "down", "a")
         self.assertEqual(app.fr["page"], "folders")                                    # nothing ticked: stays
         self.press("b", "b")
         self.assertFalse(app.running if hasattr(app, "running") else False)           # no games: B leaves
@@ -214,6 +229,53 @@ class PadScreens(unittest.TestCase):
         with mock.patch.object(setup, "find_game_folders", return_value=[]):
             self.press("a")
         self.assertEqual(app.fr["page"], "nofolders")
+
+    def to_row(self, name):
+        """Move the browser's selection onto a folder's row."""
+        rows = self.app.browse_rows()
+        k = next(i for i, (kind, n) in enumerate(rows) if n == name)
+        self.app.fr["bsel"] = 0; self.press(*["down"] * k)
+
+    def test_choosing_a_folder_by_hand(self):
+        app = self.app
+        games = f"{S.TMP}/Stuff/My Games"
+        files(games, [f"Game {k}.nes" for k in range(6)])
+        os.makedirs(f"{S.TMP}/Stuff/Empty", exist_ok=True); os.makedirs(f"{S.TMP}/.hidden", exist_ok=True)
+        with mock.patch.object(setup, "find_game_folders", return_value=[(f"{S.TMP}/b", 7, False)]):
+            self.press("a")
+        self.press("down", "a")                                                        # Choose another folder…
+        self.assertEqual((app.fr["page"], app.fr["bdir"]), ("browse", paths.HOME))
+        self.assertNotIn(".hidden", app.fr["blist"])
+        self.to_row("Stuff"); self.press("a")
+        self.assertEqual(app.fr["bdir"], f"{S.TMP}/Stuff")
+        self.to_row("Empty"); self.press("a")
+        self.press("a")                                                                # Use this folder: no games in it
+        self.assertEqual(app.fr["page"], "browse")
+        self.press("left")                                                             # up, onto the folder it was in
+        self.assertEqual((app.fr["bdir"], app.browse_rows()[app.fr["bsel"]][1]), (f"{S.TMP}/Stuff", "Empty"))
+        self.to_row("My Games"); self.press("a")
+        self.press("a")                                                                # Use this folder
+        self.assertEqual(app.fr["page"], "folders")
+        self.assertEqual(app.fr["found"][-1], (games, 6, True))
+        self.assertEqual((app.fr["pick"], app.fr["sel"]), ({1}, 1))                    # ticked and selected
+        self.press("down", "a")                                                        # the same folder again: no new row
+        self.assertEqual(app.fr["bdir"], games)                                        # the browser opens where it was
+        self.press("a"); self.assertEqual((len(app.fr["found"]), app.fr["pick"]), (2, {1}))
+        app._thread = lambda target: None                                              # don't start the real work
+        self.press("down", "down", "a")
+        self.assertEqual((app.fr["page"], app.fr["folders"]), ("working", [games]))
+
+    def test_no_folders_found_offers_choosing_one(self):
+        app = self.app
+        with mock.patch.object(setup, "find_game_folders", return_value=[]):
+            self.press("a")
+            self.assertEqual(app.fr["page"], "nofolders")
+            self.press("a"); self.assertEqual(app.fr["page"], "browse")
+            self.press("b"); self.assertEqual(app.fr["page"], "nofolders")             # back where it came from
+            self.press("y"); self.assertEqual(app.fr["page"], "nofolders")             # looked again
+        self.press("a"); self.press("up")
+        self.assertEqual(app.browse_rows()[0][0], "use")
+        app.browse_to("/"); self.assertNotIn(("up", None), app.browse_rows())          # nothing above the top
 
     def test_the_background_run_shows_and_its_games_appear(self):
         app = self.app

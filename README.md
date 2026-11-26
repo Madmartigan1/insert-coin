@@ -522,9 +522,11 @@ When Insert Coin starts with no games, it sets itself up, all on the controller:
 |---|---|
 | ![Setup: the folders with game files, two of three ticked, and Continue](docs/screenshots/setup_folders.png) | ![Setup: databases, cores, BIOS and the scan done, adding the recognised games](docs/screenshots/setup_working.png) |
 
-1. **Where are your games?** It looks through your home folder and plugged-in drives (linked folders too) for
-   game files, and lists the folders that hold them, with how many game files each has. The likely ones are
-   ticked; **A** ticks or unticks a folder, **Continue** goes on.
+1. **Where are your games?** It looks through your home folder, plugged-in drives and disks mounted under
+   `/mnt` (linked folders too) for game files, and lists the folders that hold them, with how many game files
+   each has. The likely ones are ticked; **A** ticks or unticks a folder, **Continue** goes on. Games somewhere
+   else? **Choose another folder…** opens a folder browser on the controller: open folders with **A**, go up
+   with *Up one folder* (or left), and pick the one with *Use this folder*.
 2. **Getting everything ready:** the game databases, the emulator cores and the BIOS folder (BIOS files lying
    among your games are picked up too: only known good ones, never replacing one). Then it scans the folders
    and adds every game the databases recognise by checksum, straight away.

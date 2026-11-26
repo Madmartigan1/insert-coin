@@ -1,7 +1,8 @@
 """First-run setup (1.0 step 3): everything a new computer needs, in one go. The pad screens (firstrun.py) and
 `insert-coin --setup` in a terminal both use these functions, so they always do the same thing.
 
-1. find the folders that hold game files (the home folder and plugged-in drives), for the player to choose from;
+1. find the folders that hold game files (the home folder, plugged-in drives and disks under /mnt), for the player
+   to choose from, or let them choose one by hand;
 2. get the game databases (--databases), the emulator cores (--cores) and the BIOS folder (--bios, plus any BIOS
    files found in the chosen folders);
 3. scan the chosen folders and add the games the databases recognise by checksum (on an empty library);
@@ -28,13 +29,34 @@ def game_exts():
 
 
 def drives():
-    """Plugged-in drives and other mounted disks the user can read."""
+    """Plugged-in drives (/media/<user>, /run/media/<user>) and disks mounted by hand under /mnt, if readable."""
     user = os.path.basename(HOME)
     out = []
-    for base in (f"/media/{user}", f"/run/media/{user}"):
-        try: out += sorted(e.path for e in os.scandir(base) if e.is_dir())
+    for base in (f"/media/{user}", f"/run/media/{user}", "/mnt"):
+        try: out += sorted(e.path for e in os.scandir(base) if e.is_dir() and os.access(e.path, os.R_OK | os.X_OK))
         except OSError: pass
     return out
+
+
+def subfolders(path):
+    """The folders in a folder, for choosing one by hand: hidden ones left out, sorted by name."""
+    try: return sorted((e.name for e in os.scandir(path) if not e.name.startswith(".") and e.is_dir()), key=str.lower)
+    except OSError: return []
+
+
+def count_game_files(folder, progress=None):
+    """Game files in a folder and below it, by the same rules as find_game_folders."""
+    roms, archives = game_exts(); exts = roms | archives
+    n = seen = 0; visited = set()
+    for d, dirs, files in os.walk(folder, followlinks=True):
+        real = os.path.realpath(d)
+        if real in visited: dirs[:] = []; continue
+        visited.add(real)
+        dirs[:] = [x for x in dirs if not x.startswith(".") and x not in SKIP]
+        seen += 1
+        if progress and seen % 500 == 0: progress(seen)
+        n += sum(os.path.splitext(f)[1].lower() in exts for f in files)
+    return n
 
 
 def find_game_folders(roots=None, progress=None):
@@ -285,7 +307,7 @@ def terminal(folders, ask=input, interactive=None):
     line = Progress()
     print("Insert Coin setup\n")
     if not folders:
-        print("Looking for folders with game files (your home folder and plugged-in drives)...")
+        print("Looking for folders with game files (your home folder and drives)...")
         found = find_game_folders(progress=lambda n: line.show(f"  {n:,} folders..."))
         line.clear()
         if not found:

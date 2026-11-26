@@ -2,6 +2,7 @@
 `insert-coin --setup`, and runs in a thread so the screen keeps moving.
 
   welcome -> looking -> folders (or nofolders) -> working -> art (if the art server has pictures) -> done
+                          folders / nofolders -> browse (choose a folder by hand) -> folders
 
 It opens by itself whenever the library has no games, and from the B menu ("Find games"). After it, the games
 that need a test start (and the box art, if wanted) carry on in the background; the home screen shows how far
@@ -33,6 +34,42 @@ class FirstRun:
         fr["found"], fr["pick"], fr["sel"] = found, {k for k, (_, _, likely) in enumerate(found) if likely}, 0
         fr["page"] = "folders" if found else "nofolders"
         log.info("Setup: %d folders with game files found", len(found))
+
+    def _count(self):
+        """The folder chosen by hand: how many game files it holds; it joins the list, ticked."""
+        fr = self.fr; folder = fr["bdir"]
+        def counted(n): fr["seen"] = n
+        try: n = setup.count_game_files(folder, progress=counted)
+        except Exception: log.exception("Setup: counting game files"); n = 0
+        if not n:
+            fr["page"] = "browse"; self.err(f"No game files in {short(folder)}"); return
+        known = [k for k, (f, _, _) in enumerate(fr["found"]) if f == folder]
+        if known: k = known[0]
+        else: fr["found"].append((folder, n, True)); k = len(fr["found"]) - 1
+        fr["pick"].add(k); fr["sel"] = k; fr["page"] = "folders"
+        log.info("Setup: folder chosen by hand: %s (%d game files)", folder, n)
+
+    # -- choosing a folder by hand
+    def open_browser(self):
+        fr = self.fr
+        fr["bfrom"] = fr["page"]; fr["page"] = "browse"
+        self.browse_to(fr.get("bdir") or HOME)
+
+    def browse_to(self, folder, sel_name=None):
+        fr = self.fr
+        fr["bdir"], fr["blist"] = folder, setup.subfolders(folder)
+        rows = self.browse_rows()
+        fr["bsel"] = next((k for k, (kind, name) in enumerate(rows) if name == sel_name), 0)
+
+    def browse_rows(self):
+        """[(kind, name)]: use this folder, up one folder (not at the top), then the folders in it."""
+        fr = self.fr
+        return [("use", None)] + ([("up", None)] if fr["bdir"] != "/" else []) + [("dir", d) for d in fr["blist"]]
+
+    def browse_up(self):
+        fr = self.fr
+        if fr["bdir"] == "/": return
+        self.browse_to(os.path.dirname(fr["bdir"]), sel_name=os.path.basename(fr["bdir"])); self.sfx.play("back")
 
     def _work(self):
         fr, folders = self.fr, self.fr["folders"]
@@ -74,16 +111,34 @@ class FirstRun:
         fr = self.fr; page = fr["page"]
         if act == "start": act = "go"
         if page in ("welcome", "nofolders"):
-            if act in ("a", "go"):
+            if page == "nofolders" and act in ("a", "go"): self.sfx.play("select"); self.open_browser()
+            elif act in ("a", "go") or (page == "nofolders" and act == "y"):
                 fr["page"] = "looking"; self.sfx.play("select"); self._thread(self._look)
             elif act == "b": self.leave_firstrun()
-        elif page == "folders":
-            n = len(fr["found"])                                         # rows: the folders, then Continue
+        elif page == "browse":
+            rows = self.browse_rows(); sel = fr["bsel"]
             if act in ("up", "down"):
-                new = max(0, min(n, fr["sel"] + (1 if act == "down" else -1)))
+                new = max(0, min(len(rows) - 1, sel + (1 if act == "down" else -1)))
+                if new != sel: fr["bsel"] = new; self.sfx.play("move")
+            elif act in ("lb", "rb"):
+                fr["bsel"] = max(0, min(len(rows) - 1, sel + (ROWS if act == "rb" else -ROWS))); self.sfx.play("move")
+            elif act == "left": self.browse_up()
+            elif act in ("a", "go", "right"):
+                kind, name = rows[sel]
+                if kind == "use" and act != "right":
+                    fr["page"] = "looking"; fr["seen"] = 0; self.sfx.play("select"); self._thread(self._count)
+                elif kind == "up": self.browse_up()
+                elif kind == "dir": self.browse_to(os.path.join(fr["bdir"], name)); self.sfx.play("select")
+            elif act == "b": fr["page"] = fr.get("bfrom", "folders"); self.sfx.play("back")
+        elif page == "folders":
+            n = len(fr["found"])                         # rows: the folders, Choose another folder (n), Continue (n + 1)
+            if act in ("up", "down"):
+                new = max(0, min(n + 1, fr["sel"] + (1 if act == "down" else -1)))
                 if new != fr["sel"]: fr["sel"] = new; self.sfx.play("move")
             elif act == "a" and fr["sel"] < n:
                 fr["pick"] ^= {fr["sel"]}; self.sfx.play("select")
+            elif act == "a" and fr["sel"] == n:
+                self.sfx.play("select"); self.open_browser()
             elif act in ("a", "go"):
                 if not fr["pick"]: self.err("Tick at least one folder (A)"); return
                 fr["folders"] = [fr["found"][k][0] for k in sorted(fr["pick"])]
@@ -164,20 +219,21 @@ class FirstRun:
             mid(f"{fr['seen']:,} folders looked through", 500, 30, (190, 195, 210))
         elif page == "nofolders":
             self.draw_header("Finding your games", "Set up")
-            mid("No game files were found.", 380, 44, (255, 255, 255), True)
-            mid("Copy your games into a folder in your home folder (for example Games),", 470)
-            mid("then look again.", 524)
-            self.draw_hints([("a", "Look again"), ("b", back)])
+            mid("No game files were found in your home folder or on your drives.", 380, 44, (255, 255, 255), True)
+            mid("Choose the folder your games are in, or copy them into your home folder", 470)
+            mid("(for example into a folder called Games) and look again.", 524)
+            self.draw_hints([("a", "Choose a folder"), ("y", "Look again"), ("b", back)])
         elif page == "folders":
             self.draw_header("Where are your games?", "Set up: tick the folders to use")
-            n = len(fr["found"]); top = max(0, min(fr["sel"] - ROWS // 2, n + 1 - ROWS))
-            for k in range(top, min(n + 1, top + ROWS)):
+            n = len(fr["found"]); top = max(0, min(fr["sel"] - ROWS // 2, n + 2 - ROWS))
+            for k in range(top, min(n + 2, top + ROWS)):
                 y = 200 + (k - top) * 92; on = fr["sel"] == k
                 r = pygame.Rect(260, y, W - 520, 78)
                 rrect(self.screen, (230, 232, 240) if on else (45, 48, 64), r, 18)
                 ink = (20, 22, 30) if on else (235, 238, 245)
-                if k == n:
-                    text(self.screen, self.fonts(32, True), "Continue", r.center, ink, anchor="center", shadow=False); continue
+                if k >= n:
+                    label = "Choose another folder…" if k == n else "Continue"
+                    text(self.screen, self.fonts(32, k > n), label, r.center, ink, anchor="center", shadow=False); continue
                 folder, files, _ = fr["found"][k]
                 box = pygame.Rect(r.x + 26, r.y + 21, 36, 36)
                 pygame.draw.rect(self.screen, ink, box, 3, border_radius=6)
@@ -185,7 +241,26 @@ class FirstRun:
                     pygame.draw.lines(self.screen, (60, 170, 90), False, [(box.x + 7, box.y + 18), (box.x + 15, box.y + 27), (box.x + 30, box.y + 8)], 5)
                 text(self.screen, self.fonts(30, True), short(folder), (r.x + 86, r.y + 20), ink, maxw=r.w - 420, shadow=False)
                 text(self.screen, self.fonts(26), f"{files:,} game files", (r.right - 30, r.y + 24), ink, anchor="topright", shadow=False)
-            self.draw_hints([("a", "Continue" if fr["sel"] == n else "Tick"), ("b", "Back")])
+            self.draw_hints([("a", "Continue" if fr["sel"] > n else "Choose" if fr["sel"] == n else "Tick"), ("b", "Back")])
+        elif page == "browse":
+            self.draw_header("Choose the folder your games are in", f"In {short(fr['bdir'])}")
+            rows = self.browse_rows(); sel = fr["bsel"]; top = max(0, min(sel - ROWS // 2, len(rows) - ROWS))
+            for k in range(top, min(len(rows), top + ROWS)):
+                kind, name = rows[k]; on = sel == k
+                r = pygame.Rect(260, 200 + (k - top) * 92, W - 520, 78)
+                rrect(self.screen, (230, 232, 240) if on else (45, 48, 64), r, 18)
+                ink = (20, 22, 30) if on else (235, 238, 245)
+                if kind == "use":
+                    text(self.screen, self.fonts(32, True), "Use this folder", r.center, ink, anchor="center", shadow=False)
+                elif kind == "up":
+                    text(self.screen, self.fonts(30), "‹  Up one folder", (r.x + 40, r.y + 20), ink, shadow=False)
+                else:
+                    text(self.screen, self.fonts(30, True), name, (r.x + 40, r.y + 20), ink, maxw=r.w - 120, shadow=False)
+                    text(self.screen, self.fonts(30), "›", (r.right - 40, r.y + 20), ink, anchor="topright", shadow=False)
+            if len(rows) == (1 if fr["bdir"] == "/" else 2):
+                mid("No folders in here.", 200 + len(rows) * 92 + 40, 30, (190, 195, 210))
+            kind = rows[sel][0]
+            self.draw_hints([("a", {"use": "Use this folder", "up": "Up", "dir": "Open"}[kind]), ("b", "Back")])
         elif page == "working":
             self.draw_header("Getting everything ready", "Set up: this takes a few minutes")
             for k, (key, title, status, note) in enumerate(fr["steps"]):
